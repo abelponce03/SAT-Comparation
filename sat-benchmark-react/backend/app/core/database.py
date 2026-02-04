@@ -12,6 +12,12 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Pre-configured solver names for mapping (mirrors solvers.py)
+PRE_CONFIGURED_SOLVER_NAMES = {
+    1: "Kissat",
+    2: "MiniSat"
+}
+
 
 class DatabaseManager:
     """Manages SQLite database for experiments, solvers, benchmarks, and runs"""
@@ -468,11 +474,15 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # Modified query to use LEFT JOIN for solvers since we're using pre-configured solvers
         query = """
-            SELECT r.*, s.name as solver_name, b.filename as benchmark_name,
-                   b.family as benchmark_family, e.name as experiment_name
+            SELECT r.*, 
+                   COALESCE(s.name, 'Unknown') as solver_name, 
+                   b.filename as benchmark_name,
+                   b.family as benchmark_family, 
+                   e.name as experiment_name
             FROM runs r
-            JOIN solvers s ON r.solver_id = s.id
+            LEFT JOIN solvers s ON r.solver_id = s.id
             JOIN benchmarks b ON r.benchmark_id = b.id
             JOIN experiments e ON r.experiment_id = e.id
             WHERE 1=1
@@ -494,6 +504,12 @@ class DatabaseManager:
         cursor.execute(query, params)
         runs = [dict(row) for row in cursor.fetchall()]
         conn.close()
+        
+        # Map solver names from pre-configured solvers if Unknown
+        for run in runs:
+            if run.get('solver_name') == 'Unknown':
+                run['solver_name'] = PRE_CONFIGURED_SOLVER_NAMES.get(run['solver_id'], 'Unknown')
+        
         return runs
     
     def get_all_runs(self) -> List[Dict]:
@@ -522,6 +538,12 @@ class DatabaseManager:
         cursor.execute("SELECT COUNT(*) FROM experiments")
         stats['total_experiments'] = cursor.fetchone()[0]
         
+        cursor.execute("SELECT COUNT(*) FROM experiments WHERE status = 'completed'")
+        stats['completed_experiments'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM experiments WHERE status = 'running'")
+        stats['running_experiments'] = cursor.fetchone()[0]
+        
         cursor.execute("SELECT COUNT(*) FROM runs")
         stats['total_runs'] = cursor.fetchone()[0]
         
@@ -533,6 +555,9 @@ class DatabaseManager:
         
         cursor.execute("SELECT COUNT(*) FROM runs WHERE result = 'TIMEOUT'")
         stats['timeout_results'] = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM runs WHERE result = 'ERROR'")
+        stats['error_results'] = cursor.fetchone()[0]
         
         # Recent activity
         cursor.execute("""

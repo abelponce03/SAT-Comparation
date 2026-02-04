@@ -144,7 +144,7 @@ export const benchmarksApi = {
 export const experimentsApi = {
   getAll: async (status?: string): Promise<Experiment[]> => {
     const params = status ? `?status=${status}` : '';
-    const { data } = await api.get(`/experiments${params}`);
+    const { data } = await api.get(`/experiments/${params}`);
     return data;
   },
   

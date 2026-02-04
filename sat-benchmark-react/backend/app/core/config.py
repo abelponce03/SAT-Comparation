@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 from typing import List
 import yaml
+import os
 
 
 class Settings(BaseSettings):
@@ -24,12 +25,12 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173"
     ]
     
-    # Paths
+    # Paths - use environment variables for Docker compatibility
     BASE_PATH: str = str(Path(__file__).parent.parent.parent)
-    DATABASE_PATH: str = "data/experiments.db"
-    SOLVERS_PATH: str = "data/solvers"
-    BENCHMARKS_PATH: str = "data/benchmarks"
-    RESULTS_PATH: str = "data/results"
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "data/experiments.db")
+    SOLVERS_PATH: str = os.getenv("SOLVERS_DIR", "/app/solvers")
+    BENCHMARKS_PATH: str = os.getenv("BENCHMARKS_DIR", "/app/benchmarks")
+    RESULTS_PATH: str = os.getenv("RESULTS_DIR", "data/results")
     TEMP_PATH: str = "data/temp"
     CONFIG_PATH: str = "config"
     

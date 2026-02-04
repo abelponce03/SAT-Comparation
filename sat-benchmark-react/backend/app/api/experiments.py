@@ -14,6 +14,8 @@ import os
 import json
 import logging
 
+from .solvers import PRE_CONFIGURED_SOLVERS, get_solver_by_id
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -47,6 +49,7 @@ active_experiments: Dict[int, Dict] = {}
 # ==================== ENDPOINTS ====================
 
 @router.get("/")
+@router.get("")
 async def list_experiments(
     request: Request,
     status: Optional[str] = None
@@ -84,10 +87,11 @@ async def create_experiment(exp: ExperimentCreate, request: Request) -> Dict:
     """Create a new experiment"""
     db = request.app.state.db
     
-    # Validate solvers exist
+    # Validate solvers exist in pre-configured solvers
     for solver_id in exp.solver_ids:
-        if not db.get_solver(solver_id):
-            raise HTTPException(status_code=400, detail=f"Solver {solver_id} not found")
+        solver = get_solver_by_id(solver_id)
+        if not solver:
+            raise HTTPException(status_code=400, detail=f"Solver {solver_id} not found in pre-configured solvers")
     
     # Validate benchmarks exist
     for benchmark_id in exp.benchmark_ids:
@@ -274,11 +278,24 @@ async def run_experiment_task(
     completed = 0
     failed = 0
     
+    logger.info(f"Starting experiment {experiment_id} with solvers {solver_ids} and benchmarks {benchmark_ids}")
+    
     try:
         for solver_id in solver_ids:
-            solver = db.get_solver(solver_id)
+            # Use pre-configured solvers instead of database
+            solver = get_solver_by_id(solver_id)
+            logger.info(f"Processing solver_id={solver_id}, found={solver is not None}")
+            
             if not solver or solver['status'] != 'ready':
+                logger.warning(f"Solver {solver_id} not found or not ready, skipping")
                 continue
+            
+            # Verify executable exists
+            if not os.path.isfile(solver['executable_path']):
+                logger.warning(f"Solver executable not found at {solver['executable_path']}, skipping")
+                continue
+            
+            logger.info(f"Running solver {solver['name']} on {len(benchmark_ids)} benchmarks")
             
             for benchmark_id in benchmark_ids:
                 # Check stop signal
@@ -303,13 +320,19 @@ async def run_experiment_task(
                     memory_limit
                 )
                 
+                logger.info(f"Solver {solver['name']} on {benchmark['filename']}: {result['result']} in {result['wall_time_seconds']:.2f}s")
+                
                 # Save result
-                db.add_run(
-                    experiment_id=experiment_id,
-                    solver_id=solver_id,
-                    benchmark_id=benchmark_id,
-                    **result
-                )
+                try:
+                    db.add_run(
+                        experiment_id=experiment_id,
+                        solver_id=solver_id,
+                        benchmark_id=benchmark_id,
+                        **result
+                    )
+                    logger.info(f"Run saved successfully for exp={experiment_id}, solver={solver_id}, benchmark={benchmark_id}")
+                except Exception as save_error:
+                    logger.error(f"Failed to save run: {save_error}")
                 
                 if result['result'] in ['SAT', 'UNSAT']:
                     completed += 1
@@ -412,28 +435,81 @@ async def run_solver(
 
 
 def parse_solver_stats(output: str) -> Dict:
-    """Parse solver statistics from output"""
+    """Parse solver statistics from output - comprehensive extraction"""
     import re
     
     stats = {}
     
-    # Common patterns
+    # Common patterns for various solvers
     patterns = {
+        # Basic CDCL metrics
         'conflicts': r'conflicts\s*[:\s]+(\d+)',
         'decisions': r'decisions\s*[:\s]+(\d+)',
         'propagations': r'propagations\s*[:\s]+(\d+)',
         'restarts': r'restarts\s*[:\s]+(\d+)',
-        'learnt_clauses': r'learnt\s*(clauses|literals)?\s*[:\s]+(\d+)'
+        
+        # Learned clauses
+        'learnt_clauses': r'(?:learnt|learned)\s*(?:clauses|literals)?\s*[:\s]+(\d+)',
+        'deleted_clauses': r'(?:deleted|removed)\s*(?:clauses)?\s*[:\s]+(\d+)',
+        
+        # Memory (Kissat specific)
+        'max_memory_mb': r'maximum-resident-set-size:\s+(\d+)\s*bytes',
+        
+        # Additional Kissat metrics
+        'chronological': r'chronological:\s+(\d+)',
+        'vivified': r'vivified:\s+(\d+)',
+        'substituted': r'substituted:\s+(\d+)',
+        'congruent': r'congruent:\s+(\d+)',
+        'factored': r'factored:\s+(\d+)',
+        'iterations': r'iterations:\s+(\d+)',
+        'switched': r'switched:\s+(\d+)',
+        'walks': r'walks:\s+(\d+)',
+        
+        # MiniSat specific
+        'conflict_literals': r'conflict\s*literals\s*[:\s]+(\d+)',
+        'literals_deleted_pct': r'(\d+(?:\.\d+)?)\s*%\s*deleted',
+        
+        # CPU time from output
+        'cpu_time_output': r'(?:CPU|process)[- ]time[:\s]+(\d+\.?\d*)\s*(?:s|seconds)',
+        
+        # Reduction metrics
+        'reductions': r'reductions:\s+(\d+)',
+        'rephased': r'rephased:\s+(\d+)',
     }
     
     for key, pattern in patterns.items():
         match = re.search(pattern, output, re.IGNORECASE)
         if match:
             try:
-                # Get the last group (the number)
-                stats[key] = int(match.group(match.lastindex))
+                value = match.group(match.lastindex)
+                # Handle percentage values
+                if '.' in value or key.endswith('_pct'):
+                    stats[key] = float(value)
+                else:
+                    stats[key] = int(value)
             except:
                 pass
+    
+    # Convert memory from bytes to KB if found
+    if 'max_memory_mb' in stats:
+        stats['max_memory_kb'] = stats['max_memory_mb'] // 1024
+        del stats['max_memory_mb']
+    
+    # Extract CPU time from solver output if available
+    if 'cpu_time_output' in stats:
+        stats['cpu_time_seconds'] = stats['cpu_time_output']
+        del stats['cpu_time_output']
+    
+    # Calculate derived metrics
+    if stats.get('propagations') and stats.get('decisions'):
+        stats['propagations_per_decision'] = round(
+            stats['propagations'] / stats['decisions'], 2
+        )
+    
+    if stats.get('conflicts') and stats.get('restarts'):
+        stats['conflicts_per_restart'] = round(
+            stats['conflicts'] / stats['restarts'], 2
+        )
     
     return stats
 

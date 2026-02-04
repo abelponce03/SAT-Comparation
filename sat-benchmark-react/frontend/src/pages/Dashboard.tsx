@@ -28,8 +28,8 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 const pipelineStages = [
   {
     id: 'solvers',
-    title: 'Configurar Solvers',
-    description: 'Registra y configura los solvers SAT a evaluar',
+    title: 'Solvers Disponibles',
+    description: 'Kissat y MiniSat pre-configurados y listos',
     icon: Cpu,
     href: '/solvers',
     color: 'from-violet-600 to-purple-600',

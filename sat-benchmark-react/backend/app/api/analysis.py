@@ -852,3 +852,320 @@ async def export_results(
     else:
         raise HTTPException(status_code=400, detail="Format not supported")
 
+
+@router.get("/statistical-tests")
+async def get_statistical_tests(
+    request: Request,
+    experiment_id: int,
+    solver1: str,
+    solver2: str
+) -> Dict:
+    """
+    Perform comprehensive statistical tests between two solvers.
+    Includes: Wilcoxon, Mann-Whitney U, t-test, effect size
+    """
+    from scipy import stats as scipy_stats
+    
+    db = request.app.state.db
+    runs = db.get_runs(experiment_id=experiment_id)
+    
+    if not runs:
+        raise HTTPException(status_code=404, detail="No runs found")
+    
+    df = pd.DataFrame(runs)
+    
+    # Get runs for each solver
+    df1 = df[df['solver_name'] == solver1]
+    df2 = df[df['solver_name'] == solver2]
+    
+    if len(df1) == 0 or len(df2) == 0:
+        raise HTTPException(status_code=404, detail="One or both solvers not found")
+    
+    # Get common benchmarks where both solved
+    solved1 = df1[df1['result'].isin(['SAT', 'UNSAT'])].set_index('benchmark_name')
+    solved2 = df2[df2['result'].isin(['SAT', 'UNSAT'])].set_index('benchmark_name')
+    
+    common = solved1.index.intersection(solved2.index)
+    
+    if len(common) < 3:
+        return {
+            "error": "Insufficient common solved benchmarks for statistical tests",
+            "common_solved": len(common),
+            "solver1_solved": len(solved1),
+            "solver2_solved": len(solved2)
+        }
+    
+    times1 = solved1.loc[common, 'wall_time_seconds'].values.astype(float)
+    times2 = solved2.loc[common, 'wall_time_seconds'].values.astype(float)
+    
+    results = {
+        "solvers": {"solver1": solver1, "solver2": solver2},
+        "sample_sizes": {
+            "solver1_total": len(df1),
+            "solver2_total": len(df2),
+            "solver1_solved": len(solved1),
+            "solver2_solved": len(solved2),
+            "common_solved": len(common)
+        },
+        "descriptive_stats": {
+            solver1: {
+                "mean": float(np.mean(times1)),
+                "std": float(np.std(times1)),
+                "median": float(np.median(times1)),
+                "min": float(np.min(times1)),
+                "max": float(np.max(times1)),
+                "q1": float(np.percentile(times1, 25)),
+                "q3": float(np.percentile(times1, 75)),
+                "iqr": float(np.percentile(times1, 75) - np.percentile(times1, 25)),
+                "total_time": float(np.sum(times1))
+            },
+            solver2: {
+                "mean": float(np.mean(times2)),
+                "std": float(np.std(times2)),
+                "median": float(np.median(times2)),
+                "min": float(np.min(times2)),
+                "max": float(np.max(times2)),
+                "q1": float(np.percentile(times2, 25)),
+                "q3": float(np.percentile(times2, 75)),
+                "iqr": float(np.percentile(times2, 75) - np.percentile(times2, 25)),
+                "total_time": float(np.sum(times2))
+            }
+        },
+        "tests": {}
+    }
+    
+    # Wilcoxon signed-rank test (paired, non-parametric)
+    try:
+        stat, p_value = scipy_stats.wilcoxon(times1, times2)
+        results["tests"]["wilcoxon_signed_rank"] = {
+            "statistic": float(stat),
+            "p_value": float(p_value),
+            "significant_005": bool(p_value < 0.05),
+            "significant_001": bool(p_value < 0.01),
+            "description": "Non-parametric test for paired samples"
+        }
+    except Exception as e:
+        results["tests"]["wilcoxon_signed_rank"] = {"error": str(e)}
+    
+    # Mann-Whitney U test (unpaired, non-parametric)
+    try:
+        stat, p_value = scipy_stats.mannwhitneyu(times1, times2, alternative='two-sided')
+        results["tests"]["mann_whitney_u"] = {
+            "statistic": float(stat),
+            "p_value": float(p_value),
+            "significant_005": bool(p_value < 0.05),
+            "significant_001": bool(p_value < 0.01),
+            "description": "Non-parametric test for independent samples"
+        }
+    except Exception as e:
+        results["tests"]["mann_whitney_u"] = {"error": str(e)}
+    
+    # Paired t-test (parametric)
+    try:
+        stat, p_value = scipy_stats.ttest_rel(times1, times2)
+        results["tests"]["paired_t_test"] = {
+            "statistic": float(stat),
+            "p_value": float(p_value),
+            "significant_005": bool(p_value < 0.05),
+            "significant_001": bool(p_value < 0.01),
+            "description": "Parametric test for paired samples (assumes normality)"
+        }
+    except Exception as e:
+        results["tests"]["paired_t_test"] = {"error": str(e)}
+    
+    # Independent t-test
+    try:
+        stat, p_value = scipy_stats.ttest_ind(times1, times2)
+        results["tests"]["independent_t_test"] = {
+            "statistic": float(stat),
+            "p_value": float(p_value),
+            "significant_005": bool(p_value < 0.05),
+            "description": "Parametric test for independent samples"
+        }
+    except Exception as e:
+        results["tests"]["independent_t_test"] = {"error": str(e)}
+    
+    # Effect size (Cohen's d for paired samples)
+    try:
+        diff = times1 - times2
+        cohens_d = np.mean(diff) / np.std(diff, ddof=1)
+        
+        abs_d = abs(cohens_d)
+        if abs_d < 0.2:
+            interpretation = "negligible"
+        elif abs_d < 0.5:
+            interpretation = "small"
+        elif abs_d < 0.8:
+            interpretation = "medium"
+        else:
+            interpretation = "large"
+        
+        results["tests"]["effect_size"] = {
+            "cohens_d": float(cohens_d),
+            "interpretation": interpretation,
+            "description": "Standardized mean difference (d<0.2: negligible, d<0.5: small, d<0.8: medium, d>=0.8: large)"
+        }
+    except Exception as e:
+        results["tests"]["effect_size"] = {"error": str(e)}
+    
+    # Normality tests (Shapiro-Wilk)
+    try:
+        stat1, p1 = scipy_stats.shapiro(times1[:min(50, len(times1))])
+        stat2, p2 = scipy_stats.shapiro(times2[:min(50, len(times2))])
+        results["normality_tests"] = {
+            solver1: {
+                "shapiro_statistic": float(stat1),
+                "p_value": float(p1),
+                "is_normal_005": bool(p1 > 0.05)
+            },
+            solver2: {
+                "shapiro_statistic": float(stat2),
+                "p_value": float(p2),
+                "is_normal_005": bool(p2 > 0.05)
+            },
+            "recommendation": "Use non-parametric tests if either distribution is non-normal"
+        }
+    except Exception as e:
+        results["normality_tests"] = {"error": str(e)}
+    
+    # Wins/losses analysis
+    wins1 = int(np.sum(times1 < times2))
+    wins2 = int(np.sum(times2 < times1))
+    ties = len(common) - wins1 - wins2
+    
+    results["pairwise_wins"] = {
+        f"{solver1}_faster": wins1,
+        f"{solver2}_faster": wins2,
+        "ties": ties,
+        "speedup_factor": float(np.mean(times2) / np.mean(times1)) if np.mean(times1) > 0 else None
+    }
+    
+    return results
+
+
+@router.get("/cdcl-metrics")
+async def get_cdcl_metrics(
+    request: Request,
+    experiment_id: int
+) -> Dict:
+    """
+    Get detailed CDCL solver metrics for an experiment.
+    Includes conflicts, decisions, propagations, restarts, etc.
+    """
+    db = request.app.state.db
+    runs = db.get_runs(experiment_id=experiment_id)
+    
+    if not runs:
+        raise HTTPException(status_code=404, detail="No runs found")
+    
+    df = pd.DataFrame(runs)
+    
+    def safe_float(val, default=0.0):
+        """Convert value to float safely, handling NaN/Inf"""
+        if pd.isna(val) or np.isinf(val):
+            return default
+        return float(val)
+    
+    def safe_int(val, default=0):
+        """Convert value to int safely, handling NaN"""
+        if pd.isna(val):
+            return default
+        return int(val)
+    
+    metrics_by_solver = {}
+    for solver in df['solver_name'].unique():
+        solver_df = df[df['solver_name'] == solver]
+        solved_df = solver_df[solver_df['result'].isin(['SAT', 'UNSAT'])]
+        
+        # Aggregate CDCL metrics with safe handling
+        total_conflicts = solved_df['conflicts'].sum() if 'conflicts' in solved_df.columns else 0
+        total_decisions = solved_df['decisions'].sum() if 'decisions' in solved_df.columns else 0
+        total_propagations = solved_df['propagations'].sum() if 'propagations' in solved_df.columns else 0
+        total_restarts = solved_df['restarts'].sum() if 'restarts' in solved_df.columns else 0
+        total_time = solved_df['wall_time_seconds'].sum() if 'wall_time_seconds' in solved_df.columns else 0
+        
+        metrics_by_solver[solver] = {
+            "totals": {
+                "conflicts": safe_int(total_conflicts),
+                "decisions": safe_int(total_decisions),
+                "propagations": safe_int(total_propagations),
+                "restarts": safe_int(total_restarts),
+                "solve_time": safe_float(total_time)
+            },
+            "rates": {
+                "conflicts_per_second": safe_float(total_conflicts / total_time) if safe_float(total_time) > 0 else 0.0,
+                "decisions_per_second": safe_float(total_decisions / total_time) if safe_float(total_time) > 0 else 0.0,
+                "propagations_per_second": safe_float(total_propagations / total_time) if safe_float(total_time) > 0 else 0.0,
+                "propagations_per_decision": safe_float(total_propagations / total_decisions) if safe_int(total_decisions) > 0 else 0.0,
+                "conflicts_per_restart": safe_float(total_conflicts / total_restarts) if safe_int(total_restarts) > 0 else 0.0
+            },
+            "averages_per_instance": {
+                "avg_conflicts": safe_float(solved_df['conflicts'].mean()) if len(solved_df) > 0 and 'conflicts' in solved_df.columns else 0.0,
+                "avg_decisions": safe_float(solved_df['decisions'].mean()) if len(solved_df) > 0 and 'decisions' in solved_df.columns else 0.0,
+                "avg_propagations": safe_float(solved_df['propagations'].mean()) if len(solved_df) > 0 and 'propagations' in solved_df.columns else 0.0,
+                "avg_restarts": safe_float(solved_df['restarts'].mean()) if len(solved_df) > 0 and 'restarts' in solved_df.columns else 0.0
+            },
+            "solved_instances": len(solved_df)
+        }
+    
+    return {
+        "experiment_id": experiment_id,
+        "metrics_by_solver": metrics_by_solver
+    }
+
+
+@router.get("/metrics-list")
+async def get_available_metrics() -> Dict:
+    """List all available metrics and their descriptions for rigorous analysis"""
+    return {
+        "timing_metrics": {
+            "wall_time_seconds": "Total elapsed time (wall clock) - primary performance metric",
+            "cpu_time_seconds": "CPU time used by the process",
+            "user_time_seconds": "Time spent in user mode",
+            "system_time_seconds": "Time spent in kernel mode"
+        },
+        "result_metrics": {
+            "result": "Outcome: SAT (satisfiable), UNSAT (unsatisfiable), TIMEOUT, ERROR, UNKNOWN",
+            "exit_code": "Process exit code (standard: 10=SAT, 20=UNSAT)",
+            "verified": "Whether result was verified by independent checker"
+        },
+        "memory_metrics": {
+            "max_memory_kb": "Peak memory usage in kilobytes",
+            "avg_memory_kb": "Average memory usage during execution"
+        },
+        "cdcl_metrics": {
+            "conflicts": "Number of conflicts detected during search",
+            "decisions": "Number of decision variables chosen (branching points)",
+            "propagations": "Number of unit propagations performed",
+            "restarts": "Number of search restarts triggered",
+            "learnt_clauses": "Number of conflict-driven learned clauses",
+            "deleted_clauses": "Number of learned clauses deleted (clause database management)"
+        },
+        "aggregate_metrics": {
+            "par2_score": "Penalized Average Runtime with factor 2: PAR2 = avg(t) + 2×timeout×unsolved_fraction",
+            "par10_score": "Penalized Average Runtime with factor 10 (harsher penalty)",
+            "vbs_time": "Virtual Best Solver time - hypothetical best selection per instance",
+            "solve_rate": "Percentage of instances solved within timeout"
+        },
+        "derived_metrics": {
+            "conflicts_per_second": "Conflict detection rate - indicates search efficiency",
+            "decisions_per_second": "Decision rate - indicates branching speed",
+            "propagations_per_second": "Propagation rate - indicates BCP efficiency",
+            "propagations_per_decision": "Propagation yield - higher = better unit propagation",
+            "conflicts_per_restart": "Average conflicts before restart - restart policy aggressiveness"
+        },
+        "statistical_tests": {
+            "wilcoxon_signed_rank": "Non-parametric paired test - recommended for SAT solver comparison",
+            "mann_whitney_u": "Non-parametric unpaired test - for independent samples",
+            "paired_t_test": "Parametric paired test - requires normal distribution assumption",
+            "cohens_d": "Effect size measure - quantifies practical significance",
+            "shapiro_wilk": "Normality test - validates parametric test assumptions"
+        },
+        "visualization_data": {
+            "cactus_plot": "Number of instances solved vs runtime threshold",
+            "scatter_plot": "Pairwise solver comparison on common benchmarks",
+            "ecdf": "Empirical Cumulative Distribution Function of runtimes",
+            "performance_profile": "Probability of being within factor τ of best solver",
+            "heatmap": "Solver performance across benchmark families"
+        }
+    }

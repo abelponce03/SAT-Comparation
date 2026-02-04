@@ -4,14 +4,18 @@ export interface Solver {
   name: string;
   version: string | null;
   executable_path: string;
-  source_path: string | null;
-  compile_command: string | null;
+  source_path?: string | null;
+  compile_command?: string | null;
   run_command_template: string | null;
-  last_compiled: string | null;
-  status: 'ready' | 'needs_compile' | 'compiling' | 'error';
+  last_compiled?: string | null;
+  status: 'ready' | 'needs_compile' | 'compiling' | 'error' | 'unavailable';
   description: string | null;
-  metadata: Record<string, any> | null;
-  created_at: string;
+  metadata?: Record<string, any> | null;
+  created_at?: string;
+  // Pre-configured solver fields
+  features?: string[];
+  website?: string;
+  category?: string;
 }
 
 export interface SolverCreate {
@@ -165,9 +169,12 @@ export interface DashboardStats {
   ready_solvers: number;
   total_benchmarks: number;
   total_experiments: number;
+  completed_experiments: number;
+  running_experiments: number;
   total_runs: number;
   sat_results: number;
   unsat_results: number;
   timeout_results: number;
+  error_results: number;
   recent_experiments: Experiment[];
 }

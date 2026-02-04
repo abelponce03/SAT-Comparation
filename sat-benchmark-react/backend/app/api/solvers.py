@@ -52,6 +52,16 @@ PRE_CONFIGURED_SOLVERS = {
 # "glucose": { ... },
 
 
+# ==================== HELPER FUNCTIONS ====================
+
+def get_solver_by_id(solver_id: int) -> Optional[Dict]:
+    """Get a solver by its ID from pre-configured solvers"""
+    for solver in PRE_CONFIGURED_SOLVERS.values():
+        if solver['id'] == solver_id:
+            return solver
+    return None
+
+
 # ==================== SCHEMAS ====================
 
 class SolverResponse(BaseModel):
@@ -110,6 +120,62 @@ async def get_solver_count() -> Dict:
         "ready": ready,
         "unavailable": total - ready
     }
+
+
+@router.get("/comparison-matrix")
+async def get_comparison_matrix() -> Dict:
+    """Get solver comparison matrix for UI display"""
+    comparison_data = {
+        "solvers": [
+            {
+                "name": "Kissat",
+                "type": "CDCL",
+                "preprocessing": True,
+                "inprocessing": True,
+                "parallel": False,
+                "incremental": False,
+                "best_for": ["industrial", "crafted", "random"],
+                "performance_class": "state-of-the-art"
+            },
+            {
+                "name": "MiniSat",
+                "type": "CDCL",
+                "preprocessing": True,
+                "inprocessing": False,
+                "parallel": False,
+                "incremental": True,
+                "best_for": ["educational", "small-medium"],
+                "performance_class": "reference"
+            }
+        ],
+        "features_comparison": {
+            "Kissat": {
+                "cdcl": True,
+                "vsids": True,
+                "learned_clause_minimization": True,
+                "restarts": True,
+                "preprocessing": True,
+                "inprocessing": True,
+                "bounded_variable_elimination": True,
+                "blocked_clause_elimination": True,
+                "vivification": True,
+                "probe": True
+            },
+            "MiniSat": {
+                "cdcl": True,
+                "vsids": True,
+                "learned_clause_minimization": True,
+                "restarts": True,
+                "preprocessing": True,
+                "inprocessing": False,
+                "bounded_variable_elimination": False,
+                "blocked_clause_elimination": False,
+                "vivification": False,
+                "probe": False
+            }
+        }
+    }
+    return comparison_data
 
 
 @router.get("/{solver_id}")
