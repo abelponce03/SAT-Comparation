@@ -253,7 +253,80 @@ class DatabaseManager:
         return success
     
     # ==================== BENCHMARK OPERATIONS ====================
-    
+
+    def get_benchmark_aggregates(self) -> Dict:
+        """Get benchmark aggregate statistics using SQL (no full table scan)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Total + averages in one query
+        cursor.execute("""
+            SELECT COUNT(*) as total,
+                   COALESCE(AVG(num_variables), 0) as avg_variables,
+                   COALESCE(AVG(num_clauses), 0) as avg_clauses
+            FROM benchmarks
+        """)
+        row = dict(cursor.fetchone())
+
+        # Difficulty distribution
+        cursor.execute("""
+            SELECT COALESCE(difficulty, 'unknown') as difficulty, COUNT(*) as cnt
+            FROM benchmarks GROUP BY difficulty
+        """)
+        difficulty_distribution = {r['difficulty']: r['cnt'] for r in cursor.fetchall()}
+
+        conn.close()
+        return {
+            "total": row["total"],
+            "avg_variables": row["avg_variables"],
+            "avg_clauses": row["avg_clauses"],
+            "difficulty_distribution": difficulty_distribution,
+        }
+
+    def get_benchmarks_paginated(self, family: str = None, difficulty: str = None,
+                                  search: str = None, page: int = 1,
+                                  page_size: int = 50) -> Dict:
+        """Get benchmarks with server-side pagination"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        where_parts = ["1=1"]
+        params: list = []
+
+        if family:
+            where_parts.append("family = ?")
+            params.append(family)
+        if difficulty:
+            where_parts.append("difficulty = ?")
+            params.append(difficulty)
+        if search:
+            where_parts.append("filename LIKE ?")
+            params.append(f"%{search}%")
+
+        where_clause = " AND ".join(where_parts)
+
+        # Count total matching
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM benchmarks WHERE {where_clause}", params)
+        total = cursor.fetchone()["cnt"]
+
+        # Fetch page
+        offset = (max(1, page) - 1) * page_size
+        cursor.execute(
+            f"SELECT * FROM benchmarks WHERE {where_clause} ORDER BY filename LIMIT ? OFFSET ?",
+            params + [page_size, offset]
+        )
+        items = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        pages = max(1, (total + page_size - 1) // page_size)
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
+
     def add_benchmark(self, filename: str, filepath: str,
                      family: str = None, size_bytes: int = None,
                      num_variables: int = None, num_clauses: int = None,

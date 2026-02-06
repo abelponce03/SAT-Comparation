@@ -1,15 +1,19 @@
 import { useState, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
-import { 
-  FileText, 
-  Upload, 
-  Search, 
+import {
+  FileText,
+  Upload,
+  Search,
   Trash2,
   Eye,
   FolderSearch,
   Loader2,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { benchmarksApi } from '@/services/api';
@@ -19,21 +23,39 @@ import Badge from '@/components/common/Badge';
 import Modal from '@/components/common/Modal';
 import EmptyState from '@/components/common/EmptyState';
 
+const PAGE_SIZE = 50;
+
 export default function Benchmarks() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [familyFilter, setFamilyFilter] = useState<string>('all');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
   const [previewBenchmark, setPreviewBenchmark] = useState<Benchmark | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
-  // Queries
-  const { data: benchmarks, isLoading } = useQuery({
-    queryKey: ['benchmarks', familyFilter, difficultyFilter],
-    queryFn: () => benchmarksApi.getAll(
+  // Debounce search
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchTerm(value);
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Paginated query
+  const { data: benchmarkData, isLoading, isFetching } = useQuery({
+    queryKey: ['benchmarks', familyFilter, difficultyFilter, page, debouncedSearch],
+    queryFn: () => benchmarksApi.getPaginated(
+      page,
+      PAGE_SIZE,
       familyFilter !== 'all' ? familyFilter : undefined,
-      difficultyFilter !== 'all' ? difficultyFilter : undefined
+      difficultyFilter !== 'all' ? difficultyFilter : undefined,
+      debouncedSearch || undefined,
     ),
+    placeholderData: keepPreviousData,
   });
 
   const { data: families } = useQuery({
@@ -64,6 +86,7 @@ export default function Benchmarks() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['benchmarks'] });
       queryClient.invalidateQueries({ queryKey: ['benchmark-families'] });
+      queryClient.invalidateQueries({ queryKey: ['benchmark-stats'] });
       toast.success(`${data.imported} benchmarks importados de ${data.found} encontrados`);
     },
     onError: () => toast.error('Error al escanear directorio'),
@@ -73,16 +96,16 @@ export default function Benchmarks() {
     mutationFn: (id: number) => benchmarksApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['benchmarks'] });
+      queryClient.invalidateQueries({ queryKey: ['benchmark-stats'] });
       toast.success('Benchmark eliminado');
     },
   });
 
-  // Filter benchmarks
-  const filteredBenchmarks = benchmarks?.filter(benchmark => 
-    benchmark.filename.toLowerCase().includes(searchTerm.toLowerCase())
-  ) || [];
+  const benchmarks = benchmarkData?.items || [];
+  const totalItems = benchmarkData?.total || 0;
+  const totalPages = benchmarkData?.pages || 1;
 
-  if (isLoading) {
+  if (isLoading && !benchmarkData) {
     return <LoadingSpinner size="lg" text="Cargando benchmarks..." />;
   }
 
@@ -124,26 +147,10 @@ export default function Benchmarks() {
       {/* Stats Cards */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard 
-            label="Total Benchmarks" 
-            value={stats.total} 
-            color="blue" 
-          />
-          <StatCard 
-            label="Variables (promedio)" 
-            value={Math.round(stats.avg_variables).toLocaleString()} 
-            color="green" 
-          />
-          <StatCard 
-            label="Cláusulas (promedio)" 
-            value={Math.round(stats.avg_clauses).toLocaleString()} 
-            color="purple" 
-          />
-          <StatCard 
-            label="Familias" 
-            value={families?.length || 0} 
-            color="yellow" 
-          />
+          <StatCard label="Total Benchmarks" value={stats.total} color="blue" />
+          <StatCard label="Variables (promedio)" value={Math.round(stats.avg_variables).toLocaleString()} color="green" />
+          <StatCard label="Cláusulas (promedio)" value={Math.round(stats.avg_clauses).toLocaleString()} color="purple" />
+          <StatCard label="Familias" value={families?.length || 0} color="yellow" />
         </div>
       )}
 
@@ -155,14 +162,17 @@ export default function Benchmarks() {
             type="text"
             placeholder="Buscar benchmark..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="input pl-10"
           />
+          {isFetching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-400 animate-spin" />
+          )}
         </div>
-        
+
         <select
           value={familyFilter}
-          onChange={(e) => setFamilyFilter(e.target.value)}
+          onChange={(e) => { setFamilyFilter(e.target.value); setPage(1); }}
           className="input w-full sm:w-48"
         >
           <option value="all">Todas las familias</option>
@@ -175,7 +185,7 @@ export default function Benchmarks() {
 
         <select
           value={difficultyFilter}
-          onChange={(e) => setDifficultyFilter(e.target.value)}
+          onChange={(e) => { setDifficultyFilter(e.target.value); setPage(1); }}
           className="input w-full sm:w-40"
         >
           <option value="all">Dificultad</option>
@@ -191,7 +201,10 @@ export default function Benchmarks() {
           {families.slice(0, 10).map((f: BenchmarkFamily) => (
             <button
               key={f.family}
-              onClick={() => setFamilyFilter(f.family === familyFilter ? 'all' : f.family)}
+              onClick={() => {
+                setFamilyFilter(f.family === familyFilter ? 'all' : f.family);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                 familyFilter === f.family
                   ? 'bg-primary-100 text-primary-700'
@@ -205,7 +218,7 @@ export default function Benchmarks() {
       )}
 
       {/* Benchmarks Table */}
-      {filteredBenchmarks.length === 0 ? (
+      {benchmarks.length === 0 && !isFetching ? (
         <EmptyState
           title="No hay benchmarks"
           description="Sube archivos CNF o escanea un directorio"
@@ -233,7 +246,7 @@ export default function Benchmarks() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredBenchmarks.map((benchmark) => (
+                {benchmarks.map((benchmark: Benchmark) => (
                   <tr key={benchmark.id}>
                     <td>
                       <div className="flex items-center gap-2">
@@ -285,11 +298,49 @@ export default function Benchmarks() {
               </tbody>
             </table>
           </div>
-          
-          <div className="px-6 py-4 border-t border-dark-700 bg-dark-800">
+
+          {/* Pagination Footer */}
+          <div className="px-6 py-4 border-t border-dark-700 bg-dark-800 flex items-center justify-between">
             <p className="text-sm text-gray-400">
-              Mostrando {filteredBenchmarks.length} de {benchmarks?.length || 0} benchmarks
+              Mostrando {Math.min((page - 1) * PAGE_SIZE + 1, totalItems)}–{Math.min(page * PAGE_SIZE, totalItems)} de {totalItems} benchmarks
             </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page <= 1}
+                className="p-1.5 rounded hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-400"
+                title="Primera página"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1.5 rounded hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-400"
+                title="Anterior"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-3 py-1 text-sm text-gray-300">
+                {page} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="p-1.5 rounded hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-400"
+                title="Siguiente"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages}
+                className="p-1.5 rounded hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-400"
+                title="Última página"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -322,17 +373,18 @@ export default function Benchmarks() {
   );
 }
 
-// Helper Components
+// ==================== Helper Components ====================
+
 function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
   const colorClasses: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-700',
-    green: 'bg-green-50 text-green-700',
-    purple: 'bg-purple-50 text-purple-700',
-    yellow: 'bg-yellow-50 text-yellow-700',
+    blue: 'bg-blue-900/30 border border-blue-700/40 text-blue-300',
+    green: 'bg-green-900/30 border border-green-700/40 text-green-300',
+    purple: 'bg-purple-900/30 border border-purple-700/40 text-purple-300',
+    yellow: 'bg-yellow-900/30 border border-yellow-700/40 text-yellow-300',
   };
 
   return (
-    <div className={`rounded-lg p-4 ${colorClasses[color]}`}>
+    <div className={`rounded-xl p-4 ${colorClasses[color]}`}>
       <p className="text-sm opacity-80">{label}</p>
       <p className="text-2xl font-bold mt-1">{value}</p>
     </div>
@@ -346,11 +398,11 @@ function DifficultyBadge({ difficulty }: { difficulty: string }) {
     hard: 'error',
     unknown: 'gray',
   };
-  
+
   return <Badge variant={variants[difficulty] || 'gray'}>{difficulty}</Badge>;
 }
 
-function UploadDropzone({ onUpload, isLoading }: { 
+function UploadDropzone({ onUpload, isLoading }: {
   onUpload: (files: File[]) => void;
   isLoading: boolean;
 }) {
@@ -376,16 +428,16 @@ function UploadDropzone({ onUpload, isLoading }: {
       <div
         {...getRootProps()}
         className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-          isDragActive 
-            ? 'border-primary-500 bg-primary-50' 
+          isDragActive
+            ? 'border-primary-500 bg-primary-50'
             : 'border-gray-300 hover:border-gray-400'
         }`}
       >
         <input {...getInputProps()} />
         <Upload className="w-12 h-12 mx-auto text-gray-400 mb-4" />
         <p className="text-gray-400">
-          {isDragActive 
-            ? 'Suelta los archivos aquí...' 
+          {isDragActive
+            ? 'Suelta los archivos aquí...'
             : 'Arrastra archivos CNF o haz clic para seleccionar'}
         </p>
         <p className="text-sm text-gray-400 mt-2">Solo archivos .cnf</p>
@@ -398,7 +450,7 @@ function UploadDropzone({ onUpload, isLoading }: {
           </h4>
           <div className="max-h-48 overflow-y-auto space-y-2">
             {files.map((file, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-center justify-between p-2 bg-dark-800 rounded"
               >

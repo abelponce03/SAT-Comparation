@@ -24,12 +24,12 @@ PRE_CONFIGURED_SOLVERS = {
     "kissat": {
         "id": 1,
         "name": "Kissat",
-        "version": "3.1.1",
-        "description": "Kissat SAT Solver - Powerful CDCL solver that won multiple SAT competitions. Known for excellent performance on industrial instances.",
+        "version": "4.0.4",
+        "description": "Kissat SAT Solver - Powerful CDCL solver that won multiple SAT competitions (2020, 2021, 2022). Known for excellent performance on industrial and crafted instances.",
         "executable_path": "/app/solvers/kissat/build/kissat",
         "run_command_template": "{executable} {input_file}",
         "status": "ready",
-        "features": ["CDCL", "Preprocessing", "Inprocessing", "Learned clause minimization"],
+        "features": ["CDCL", "Preprocessing", "Inprocessing", "Learned clause minimization", "Vivification", "Lucky phases"],
         "website": "https://github.com/arminbiere/kissat",
         "category": "competition"
     },
@@ -37,11 +37,11 @@ PRE_CONFIGURED_SOLVERS = {
         "id": 2,
         "name": "MiniSat",
         "version": "2.2.0",
-        "description": "MiniSat - Minimalistic, open-source SAT solver. Reference implementation for CDCL algorithm. Excellent for learning and research.",
+        "description": "MiniSat - Minimalistic, open-source SAT solver. The reference implementation for CDCL algorithm with two-watched literals. Widely used in academia and as a base for many derived solvers.",
         "executable_path": "/app/solvers/minisat/core/minisat",
         "run_command_template": "{executable} {input_file} {output_file}",
         "status": "ready",
-        "features": ["CDCL", "Conflict clause learning", "Variable activity", "Two-literal watching"],
+        "features": ["CDCL", "Conflict clause learning", "Variable activity (VSIDS)", "Two-watched literals", "Phase saving"],
         "website": "http://minisat.se/",
         "category": "educational"
     },
@@ -50,11 +50,12 @@ PRE_CONFIGURED_SOLVERS = {
         "name": "CaDiCaL",
         "version": "2.1.3",
         "description": "CaDiCaL - Conflict-Driven Clause Learning SAT Solver by Armin Biere. "
-                       "Advanced CDCL with chronological backtracking. Multiple SAT Competition wins.",
+                       "Advanced CDCL with chronological backtracking and extensive inprocessing. "
+                       "Multiple SAT Competition wins. Also the backbone of the CaDiCaL-based portfolio.",
         "executable_path": "/app/solvers/cadical/build/cadical",
         "run_command_template": "{executable} {input_file}",
         "status": "not_installed",
-        "features": ["CDCL", "Chronological backtracking", "Inprocessing", "Vivification", "Lucky phases"],
+        "features": ["CDCL", "Chronological backtracking", "Inprocessing", "Vivification", "Lucky phases", "Bounded variable elimination"],
         "website": "https://github.com/arminbiere/cadical",
         "category": "competition"
     },
@@ -75,6 +76,59 @@ PRE_CONFIGURED_SOLVERS = {
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+# Cache detected versions so we only probe once per process lifetime
+_detected_versions: Dict[str, str] = {}
+
+def _detect_solver_version(solver_key: str, solver: Dict) -> Optional[str]:
+    """Try to detect the real version of a solver binary at runtime."""
+    if solver_key in _detected_versions:
+        return _detected_versions[solver_key]
+
+    exe = Path(solver["executable_path"])
+    if not exe.exists() or not os.access(str(exe), os.X_OK):
+        return None
+
+    # Each solver has its own way to report version
+    version_flags = {
+        "kissat": ["--version"],
+        "minisat": ["--help"],   # MiniSat prints version in first line
+        "cadical": ["--version"],
+        "cryptominisat": ["--version"],
+    }
+
+    flags = version_flags.get(solver_key, ["--version"])
+    try:
+        result = subprocess.run(
+            [str(exe)] + flags,
+            capture_output=True, text=True, timeout=5
+        )
+        output = (result.stdout + result.stderr).strip()
+        if not output:
+            return None
+
+        # Parse version from output
+        import re
+        if solver_key == "minisat":
+            # MiniSat prints something like "This is MiniSat 2.2.0"
+            m = re.search(r"MiniSat\s+([\d.]+)", output, re.IGNORECASE)
+            if m:
+                ver = m.group(1)
+                _detected_versions[solver_key] = ver
+                return ver
+        else:
+            # For kissat / cadical / cms the first line usually is just the version
+            first = output.splitlines()[0].strip()
+            m = re.search(r"([\d]+\.[\d]+\.[\d]+)", first)
+            if m:
+                ver = m.group(1)
+                _detected_versions[solver_key] = ver
+                return ver
+    except Exception as exc:
+        logger.debug("Version detection failed for %s: %s", solver_key, exc)
+
+    return None
+
 
 def get_solver_by_id(solver_id: int) -> Optional[Dict]:
     """Get a solver by its ID from pre-configured solvers"""
@@ -112,13 +166,18 @@ class SolverTestResult(BaseModel):
 @router.get("/")
 async def list_solvers(request: Request, status: Optional[str] = None) -> List[Dict]:
     """Get all pre-configured solvers"""
-    solvers = list(PRE_CONFIGURED_SOLVERS.values())
+    import copy
+    solvers = [copy.deepcopy(s) for s in PRE_CONFIGURED_SOLVERS.values()]
     
-    # Check actual status of each solver
-    for solver in solvers:
+    # Check actual status and detect real version for each solver
+    for key, solver in zip(PRE_CONFIGURED_SOLVERS.keys(), solvers):
         exe_path = Path(solver['executable_path'])
         if exe_path.exists() and os.access(str(exe_path), os.X_OK):
             solver['status'] = 'ready'
+            # Try dynamic version detection (cached after first call)
+            detected = _detect_solver_version(key, solver)
+            if detected:
+                solver['version'] = detected
         else:
             solver['status'] = 'unavailable'
     
@@ -156,18 +215,38 @@ async def get_comparison_matrix() -> Dict:
                 "inprocessing": True,
                 "parallel": False,
                 "incremental": False,
-                "best_for": ["industrial", "crafted", "random"],
-                "performance_class": "state-of-the-art"
+                "best_for": ["Industrial", "Crafted", "Competition"],
+                "performance_class": "State-of-the-art"
             },
             {
                 "name": "MiniSat",
                 "type": "CDCL",
-                "preprocessing": True,
+                "preprocessing": False,
                 "inprocessing": False,
                 "parallel": False,
                 "incremental": True,
-                "best_for": ["educational", "small-medium"],
-                "performance_class": "reference"
+                "best_for": ["Educational", "Research", "Small instances"],
+                "performance_class": "Reference implementation"
+            },
+            {
+                "name": "CaDiCaL",
+                "type": "CDCL",
+                "preprocessing": True,
+                "inprocessing": True,
+                "parallel": False,
+                "incremental": True,
+                "best_for": ["Industrial", "Verification", "Competition"],
+                "performance_class": "State-of-the-art"
+            },
+            {
+                "name": "CryptoMiniSat",
+                "type": "CDCL + XOR",
+                "preprocessing": True,
+                "inprocessing": True,
+                "parallel": True,
+                "incremental": True,
+                "best_for": ["Cryptographic", "XOR-heavy", "Structured"],
+                "performance_class": "Specialized"
             }
         ],
         "features_comparison": {
@@ -188,13 +267,45 @@ async def get_comparison_matrix() -> Dict:
                 "vsids": True,
                 "learned_clause_minimization": True,
                 "restarts": True,
-                "preprocessing": True,
+                "preprocessing": False,
                 "inprocessing": False,
                 "bounded_variable_elimination": False,
                 "blocked_clause_elimination": False,
                 "vivification": False,
                 "probe": False
+            },
+            "CaDiCaL": {
+                "cdcl": True,
+                "vsids": True,
+                "learned_clause_minimization": True,
+                "restarts": True,
+                "preprocessing": True,
+                "inprocessing": True,
+                "bounded_variable_elimination": True,
+                "blocked_clause_elimination": True,
+                "vivification": True,
+                "probe": True
+            },
+            "CryptoMiniSat": {
+                "cdcl": True,
+                "vsids": True,
+                "learned_clause_minimization": True,
+                "restarts": True,
+                "preprocessing": True,
+                "inprocessing": True,
+                "bounded_variable_elimination": True,
+                "blocked_clause_elimination": False,
+                "vivification": False,
+                "probe": True
             }
+        },
+        "legend": {
+            "CDCL": "Conflict-Driven Clause Learning",
+            "CDCL + XOR": "CDCL with native XOR / Gaussian reasoning",
+            "preprocessing": "Simplification before solving",
+            "inprocessing": "Simplification during solving",
+            "parallel": "Multi-threaded solving",
+            "incremental": "Supports adding clauses incrementally"
         }
     }
     return comparison_data
@@ -343,39 +454,3 @@ async def get_ready_solvers() -> List[Dict]:
             ready_solvers.append(solver_copy)
     
     return ready_solvers
-
-
-@router.get("/comparison-matrix")
-async def get_solver_comparison() -> Dict:
-    """Get a comparison matrix of solver features"""
-    return {
-        "solvers": [
-            {
-                "name": "Kissat",
-                "type": "CDCL",
-                "preprocessing": True,
-                "inprocessing": True,
-                "parallel": False,
-                "incremental": False,
-                "best_for": ["Industrial", "Crafted", "Competition"],
-                "performance_class": "State-of-the-art"
-            },
-            {
-                "name": "MiniSat",
-                "type": "CDCL",
-                "preprocessing": False,
-                "inprocessing": False,
-                "parallel": False,
-                "incremental": True,
-                "best_for": ["Educational", "Research", "Small instances"],
-                "performance_class": "Reference implementation"
-            }
-        ],
-        "legend": {
-            "CDCL": "Conflict-Driven Clause Learning",
-            "preprocessing": "Simplification before solving",
-            "inprocessing": "Simplification during solving",
-            "parallel": "Multi-threaded solving",
-            "incremental": "Supports adding clauses incrementally"
-        }
-    }

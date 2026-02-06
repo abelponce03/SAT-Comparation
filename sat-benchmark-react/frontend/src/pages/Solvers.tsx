@@ -49,10 +49,7 @@ export default function Solvers() {
 
   const { data: comparison } = useQuery({
     queryKey: ['solver-comparison'],
-    queryFn: async () => {
-      const response = await fetch('/api/solvers/comparison-matrix');
-      return response.json();
-    },
+    queryFn: () => solversApi.getComparison(),
   });
 
   const testMutation = useMutation({
@@ -218,6 +215,56 @@ export default function Solvers() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Features Comparison */}
+      {comparison?.features_comparison && (
+        <div className="mt-8">
+          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+            <Zap className="w-5 h-5 text-primary-400" />
+            Comparación Detallada de Técnicas
+          </h2>
+          <div className="bg-dark-800/50 border border-dark-700 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-dark-900/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">Técnica</th>
+                    {Object.keys(comparison.features_comparison).map((name: string) => (
+                      <th key={name} className="px-4 py-3 text-center text-sm font-semibold text-gray-300">
+                        {name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dark-700">
+                  {(() => {
+                    const solverNames = Object.keys(comparison.features_comparison);
+                    const featureKeys = solverNames.length > 0
+                      ? Object.keys(comparison.features_comparison[solverNames[0]])
+                      : [];
+                    return featureKeys.map((feat: string) => (
+                      <tr key={feat} className="hover:bg-dark-700/30 transition-colors">
+                        <td className="px-4 py-2.5 text-sm text-gray-300 font-medium">
+                          {feat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        </td>
+                        {solverNames.map((sName: string) => (
+                          <td key={sName} className="px-4 py-2.5 text-center">
+                            {comparison.features_comparison[sName][feat] ? (
+                              <CheckCircle2 className="w-4 h-4 text-green-400 mx-auto" />
+                            ) : (
+                              <span className="text-gray-600">—</span>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

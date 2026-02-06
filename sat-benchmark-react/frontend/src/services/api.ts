@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { 
-  Solver, SolverCreate, 
+  Solver, 
   Benchmark, BenchmarkFamily,
   Experiment, ExperimentCreate, Run,
   DashboardStats
@@ -41,44 +41,13 @@ export const solversApi = {
     return data;
   },
   
-  create: async (solver: SolverCreate) => {
-    const { data } = await api.post('/solvers', solver);
-    return data;
-  },
-  
-  update: async (id: number, updates: Partial<Solver>) => {
-    const { data } = await api.put(`/solvers/${id}`, updates);
-    return data;
-  },
-  
-  delete: async (id: number) => {
-    const { data } = await api.delete(`/solvers/${id}`);
-    return data;
-  },
-  
-  compile: async (id: number, compileCommand?: string) => {
-    const { data } = await api.post(`/solvers/${id}/compile`, { 
-      compile_command: compileCommand 
-    });
-    return data;
-  },
-  
   test: async (id: number) => {
     const { data } = await api.post(`/solvers/${id}/test`);
     return data;
   },
   
-  getTemplates: async () => {
-    const { data } = await api.get('/solvers/templates/list');
-    return data;
-  },
-  
-  upload: async (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const { data } = await api.post('/solvers/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+  getComparison: async () => {
+    const { data } = await api.get('/solvers/comparison-matrix');
     return data;
   },
 };
@@ -92,6 +61,24 @@ export const benchmarksApi = {
     if (difficulty) params.append('difficulty', difficulty);
     if (limit) params.append('limit', limit.toString());
     
+    const { data } = await api.get(`/benchmarks?${params}`);
+    // Backwards compat: API now returns { items, total, ... }
+    return data.items || data;
+  },
+
+  getPaginated: async (
+    page: number = 1,
+    pageSize: number = 50,
+    family?: string,
+    difficulty?: string,
+    search?: string,
+  ): Promise<{ items: Benchmark[]; total: number; page: number; page_size: number; pages: number }> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('page_size', pageSize.toString());
+    if (family) params.append('family', family);
+    if (difficulty) params.append('difficulty', difficulty);
+    if (search) params.append('search', search);
     const { data } = await api.get(`/benchmarks?${params}`);
     return data;
   },

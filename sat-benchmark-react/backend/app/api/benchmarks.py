@@ -110,11 +110,25 @@ async def list_benchmarks(
     request: Request,
     family: Optional[str] = None,
     difficulty: Optional[str] = None,
-    limit: Optional[int] = None
-) -> List[Dict]:
-    """Get all benchmarks with optional filters"""
+    limit: Optional[int] = None,
+    page: Optional[int] = None,
+    page_size: int = 50,
+    search: Optional[str] = None,
+) -> Dict:
+    """Get benchmarks with optional filters and pagination"""
     db = request.app.state.db
-    return db.get_benchmarks(family=family, difficulty=difficulty, limit=limit)
+
+    # If page is specified, use pagination
+    if page is not None:
+        result = db.get_benchmarks_paginated(
+            family=family, difficulty=difficulty,
+            search=search, page=page, page_size=page_size
+        )
+        return result
+
+    # Legacy: return flat list (with optional limit)
+    items = db.get_benchmarks(family=family, difficulty=difficulty, limit=limit)
+    return {"items": items, "total": len(items), "page": 1, "page_size": len(items), "pages": 1}
 
 
 @router.get("/families")
@@ -126,35 +140,17 @@ async def get_families(request: Request) -> List[Dict]:
 
 @router.get("/stats")
 async def get_benchmark_stats(request: Request) -> Dict:
-    """Get benchmark statistics"""
+    """Get benchmark statistics using SQL aggregates (no full table scan)"""
     db = request.app.state.db
-    benchmarks = db.get_benchmarks()
     families = db.get_benchmark_families()
-    
-    if not benchmarks:
-        return {
-            "total": 0,
-            "families": [],
-            "difficulty_distribution": {},
-            "avg_variables": 0,
-            "avg_clauses": 0
-        }
-    
-    # Calculate stats
-    total_vars = sum(b.get('num_variables') or 0 for b in benchmarks)
-    total_clauses = sum(b.get('num_clauses') or 0 for b in benchmarks)
-    
-    difficulty_counts = {}
-    for b in benchmarks:
-        diff = b.get('difficulty', 'unknown')
-        difficulty_counts[diff] = difficulty_counts.get(diff, 0) + 1
-    
+    agg = db.get_benchmark_aggregates()
+
     return {
-        "total": len(benchmarks),
+        "total": agg.get("total", 0),
         "families": families,
-        "difficulty_distribution": difficulty_counts,
-        "avg_variables": total_vars / len(benchmarks) if benchmarks else 0,
-        "avg_clauses": total_clauses / len(benchmarks) if benchmarks else 0
+        "difficulty_distribution": agg.get("difficulty_distribution", {}),
+        "avg_variables": agg.get("avg_variables", 0),
+        "avg_clauses": agg.get("avg_clauses", 0),
     }
 
 
