@@ -12,8 +12,7 @@ import {
   BookOpen,
   Zap,
   ChevronRight,
-  Brain,
-  Microscope
+  Brain
 } from 'lucide-react';
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -23,9 +22,8 @@ const navigation = [
   { name: 'Solvers', href: '/solvers', icon: Cpu, description: 'Solvers disponibles' },
   { name: 'Benchmarks', href: '/benchmarks', icon: FileText, description: 'Instancias CNF' },
   { name: 'Experiments', href: '/experiments', icon: FlaskConical, description: 'Ejecutar pruebas' },
-  { name: 'Analysis', href: '/analysis', icon: BarChart3, description: 'Métricas y estadísticas' },
+  { name: 'Analysis', href: '/analysis', icon: BarChart3, description: 'Análisis estadístico completo' },
   { name: 'Visualization', href: '/visualization', icon: LineChart, description: 'Gráficos y visuales' },
-  { name: 'Rigorous Analysis', href: '/rigorous', icon: Microscope, description: 'Tests estadísticos avanzados' },
   { name: 'AI Assistant', href: '/ai', icon: Brain, description: 'Generar CNF con IA' },
 ];
 

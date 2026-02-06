@@ -13,12 +13,13 @@ Todos los endpoints reciben experiment_id y timeout para configurar el análisis
 """
 
 from fastapi import APIRouter, Request, HTTPException, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from typing import Optional, List
 import numpy as np
 import pandas as pd
 import logging
 import math
+import io
 
 from app.analysis import (
     StatisticalTestSuite,
@@ -585,6 +586,239 @@ async def get_effect_sizes(
             })
     
     return results
+
+
+@router.get("/csv/{experiment_id}/{table_name}")
+async def export_csv(
+    request: Request,
+    experiment_id: int,
+    table_name: str,
+    timeout: float = Query(300),
+):
+    """
+    📥 Export any analysis table as CSV.
+    
+    table_name options:
+      - metrics_ranking: Solver ranking (PAR-2, solved, solve rate)
+      - par2_scores: PAR-2 scores
+      - normality: Normality tests (Shapiro-Wilk, D'Agostino, Anderson-Darling) per solver
+      - friedman: Friedman test result
+      - nemenyi: Nemenyi post-hoc comparisons
+      - corrections: Multiple comparison corrections (Bonferroni, Holm, BH)
+      - effect_sizes: Cohen's d and Vargha-Delaney per pair
+      - bootstrap: Bootstrap CIs per solver
+      - pairwise_bootstrap: Pairwise bootstrap differences
+      - full_statistical_tests: Full pairwise Wilcoxon analysis (2-solver)
+    """
+    db = request.app.state.db
+    data = _get_experiment_data(db, experiment_id, timeout)
+    output = io.StringIO()
+    
+    if table_name == "metrics_ranking":
+        metrics_engine = BenchmarkMetrics(timeout=timeout)
+        metrics = _normalize_metrics(metrics_engine.compute_all_metrics(data["normalized_runs"]))
+        ranking = metrics.get("ranking", [])
+        rows = []
+        for entry in ranking:
+            rows.append({
+                "rank": entry.get("rank", ""),
+                "solver": entry.get("solver", ""),
+                "par2": entry.get("par2", ""),
+                "solved": entry.get("solved", ""),
+                "solve_rate": entry.get("solve_rate", ""),
+                "avg_rank": entry.get("avg_rank", ""),
+            })
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "par2_scores":
+        metrics_engine = BenchmarkMetrics(timeout=timeout)
+        metrics = _normalize_metrics(metrics_engine.compute_all_metrics(data["normalized_runs"]))
+        par2 = metrics.get("par2_scores", {})
+        par10 = metrics.get("par10_scores", {})
+        rows = []
+        for solver in par2:
+            rows.append({"solver": solver, "par2": par2.get(solver, ""), "par10": par10.get(solver, "")})
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "normality":
+        test_suite = StatisticalTestSuite()
+        rows = []
+        for solver in data["solvers"]:
+            times = np.array(data["solver_times"][solver])
+            norm = test_suite.normality_tests(times, solver)
+            sw = norm.get("shapiro_wilk", {})
+            dag = norm.get("dagostino", {})
+            ad = norm.get("anderson_darling", {})
+            rows.append({
+                "solver": solver,
+                "n": norm.get("n", ""),
+                "shapiro_wilk_stat": sw.get("statistic", ""),
+                "shapiro_wilk_p": sw.get("p_value", ""),
+                "shapiro_wilk_normal": sw.get("is_normal", ""),
+                "dagostino_stat": dag.get("statistic", ""),
+                "dagostino_p": dag.get("p_value", ""),
+                "dagostino_normal": dag.get("is_normal", ""),
+                "anderson_darling_stat": ad.get("statistic", ""),
+                "anderson_darling_normal": ad.get("is_normal", ""),
+                "skewness": norm.get("skewness", ""),
+                "kurtosis": norm.get("kurtosis", ""),
+                "recommendation": norm.get("recommendation", ""),
+            })
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "friedman":
+        if len(data["solvers"]) < 3:
+            raise HTTPException(400, "Friedman requires ≥ 3 solvers")
+        test_suite = StatisticalTestSuite()
+        friedman = test_suite.friedman_test(data["time_matrix"])
+        fd = friedman.to_dict()
+        rows = [fd]
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "nemenyi":
+        if len(data["solvers"]) < 3:
+            raise HTTPException(400, "Nemenyi requires ≥ 3 solvers")
+        test_suite = StatisticalTestSuite()
+        friedman = test_suite.friedman_test(data["time_matrix"])
+        if not friedman.significant_005:
+            raise HTTPException(400, "Friedman not significant; Nemenyi not applicable")
+        nemenyi = test_suite.nemenyi_post_hoc(data["time_matrix"])
+        comps = nemenyi.get("comparisons", [])
+        pd.DataFrame(comps).to_csv(output, index=False)
+
+    elif table_name == "corrections":
+        if len(data["solvers"]) < 3:
+            raise HTTPException(400, "Corrections require ≥ 3 solvers for pairwise tests")
+        test_suite = StatisticalTestSuite()
+        multi = test_suite.full_multi_solver_analysis(data["time_matrix"])
+        mc = multi.get("multiple_corrections", {})
+        if not mc:
+            raise HTTPException(400, "No multiple corrections available")
+        labels = mc.get("labels", [])
+        bonf = mc.get("bonferroni", {})
+        holm = mc.get("holm", {})
+        bh = mc.get("benjamini_hochberg", {})
+        rows = []
+        for i, label in enumerate(labels):
+            rows.append({
+                "pair": label,
+                "p_original": bonf.get("original_pvalues", [None]*len(labels))[i],
+                "bonferroni_adjusted": bonf.get("adjusted_pvalues", [None]*len(labels))[i],
+                "bonferroni_significant": bonf.get("significant_005", [None]*len(labels))[i],
+                "holm_adjusted": holm.get("adjusted_pvalues", [None]*len(labels))[i],
+                "holm_significant": holm.get("significant_005", [None]*len(labels))[i],
+                "bh_adjusted": bh.get("adjusted_pvalues", [None]*len(labels))[i],
+                "bh_significant": bh.get("significant_005", [None]*len(labels))[i],
+            })
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "effect_sizes":
+        test_suite = StatisticalTestSuite()
+        rows = []
+        solvers = data["solvers"]
+        for i, s1 in enumerate(solvers):
+            for j, s2 in enumerate(solvers):
+                if i >= j:
+                    continue
+                t1 = np.array(data["solver_times"][s1])
+                t2 = np.array(data["solver_times"][s2])
+                n = min(len(t1), len(t2))
+                cd = test_suite.cohens_d(t1[:n], t2[:n])
+                vd = test_suite.vargha_delaney(t1[:n], t2[:n])
+                rows.append({
+                    "pair": f"{s1} vs {s2}",
+                    "cohens_d": cd.get("cohens_d", ""),
+                    "cohens_d_interpretation": cd.get("interpretation", ""),
+                    "cohens_d_direction": cd.get("direction", ""),
+                    "vargha_delaney_A": vd.get("A_measure", ""),
+                    "vd_interpretation": vd.get("interpretation", ""),
+                    "vd_direction": vd.get("direction", ""),
+                })
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "bootstrap":
+        engine = BootstrapEngine(n_bootstrap=5000)
+        try:
+            results = engine.full_solver_bootstrap(data["normalized_runs"], timeout=timeout, confidence=0.95)
+        except Exception as e:
+            raise HTTPException(500, f"Bootstrap failed: {e}")
+        br = results.get("bootstrap_results", results)
+        rows = []
+        for solver, metrics_data in br.items():
+            if solver in ("pairwise_differences",):
+                continue
+            if isinstance(metrics_data, dict):
+                row = {"solver": solver}
+                for metric_name, vals in metrics_data.items():
+                    if isinstance(vals, dict):
+                        row[f"{metric_name}_point"] = vals.get("statistic", vals.get("point_estimate", ""))
+                        ci = vals.get("ci_95", vals.get("ci", []))
+                        row[f"{metric_name}_ci_lower"] = vals.get("ci_lower", ci[0] if len(ci) >= 2 else "")
+                        row[f"{metric_name}_ci_upper"] = vals.get("ci_upper", ci[1] if len(ci) >= 2 else "")
+                rows.append(row)
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "pairwise_bootstrap":
+        engine = BootstrapEngine(n_bootstrap=5000)
+        try:
+            results = engine.full_solver_bootstrap(data["normalized_runs"], timeout=timeout, confidence=0.95)
+        except Exception as e:
+            raise HTTPException(500, f"Bootstrap failed: {e}")
+        pd_data = results.get("pairwise_differences", {})
+        rows = []
+        for pair, vals in pd_data.items():
+            if isinstance(vals, dict):
+                rows.append({
+                    "pair": pair.replace("_", " "),
+                    "mean_difference": vals.get("statistic", ""),
+                    "ci_lower": vals.get("ci_lower", ""),
+                    "ci_upper": vals.get("ci_upper", ""),
+                    "significant": vals.get("significant", ""),
+                    "faster_solver": vals.get("faster_solver", ""),
+                })
+        pd.DataFrame(rows).to_csv(output, index=False)
+
+    elif table_name == "full_statistical_tests":
+        test_suite = StatisticalTestSuite()
+        if len(data["solvers"]) >= 3:
+            multi = test_suite.full_multi_solver_analysis(data["time_matrix"])
+            # Export ranking + friedman + corrections as multi-sheet workaround
+            rows = []
+            for r in multi.get("ranking", []):
+                rows.append(r)
+            pd.DataFrame(rows).to_csv(output, index=False)
+        elif len(data["solvers"]) == 2:
+            s1, s2 = data["solvers"]
+            t1 = np.array(data["solver_times"][s1])
+            t2 = np.array(data["solver_times"][s2])
+            n = min(len(t1), len(t2))
+            pairwise = test_suite.full_pairwise_analysis(t1[:n], t2[:n], s1, s2)
+            # Flatten for CSV
+            flat = {
+                "solver1": s1, "solver2": s2,
+                "wilcoxon_stat": pairwise.get("wilcoxon", {}).get("statistic"),
+                "wilcoxon_p": pairwise.get("wilcoxon", {}).get("p_value"),
+                "wilcoxon_significant": pairwise.get("wilcoxon", {}).get("significant_005"),
+                "mann_whitney_stat": pairwise.get("mann_whitney", {}).get("statistic"),
+                "mann_whitney_p": pairwise.get("mann_whitney", {}).get("p_value"),
+                "cohens_d": pairwise.get("cohens_d", {}).get("cohens_d"),
+                "vargha_delaney_A": pairwise.get("vargha_delaney", {}).get("A_measure"),
+            }
+            pd.DataFrame([flat]).to_csv(output, index=False)
+        else:
+            raise HTTPException(400, "Need ≥ 2 solvers")
+
+    else:
+        raise HTTPException(400, f"Unknown table: {table_name}. Available: metrics_ranking, par2_scores, normality, friedman, nemenyi, corrections, effect_sizes, bootstrap, pairwise_bootstrap, full_statistical_tests")
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={table_name}_exp{experiment_id}.csv"
+        }
+    )
 
 
 @router.get("/available-analyses")

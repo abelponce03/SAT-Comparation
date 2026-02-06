@@ -332,6 +332,10 @@ export const rigorousApi = {
     const { data } = await api.get('/rigorous/available-analyses');
     return data;
   },
+
+  getCsvUrl: (experimentId: number, tableName: string, timeout = 300): string => {
+    return `${api.defaults.baseURL}/rigorous/csv/${experimentId}/${tableName}?timeout=${timeout}`;
+  },
 };
 
 export default api;

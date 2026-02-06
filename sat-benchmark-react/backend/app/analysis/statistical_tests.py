@@ -465,6 +465,7 @@ class StatisticalTestSuite:
         
         - Shapiro-Wilk: mejor para n < 50
         - D'Agostino-Pearson: mejor para n ≥ 20
+        - Anderson-Darling: test general, no requiere tamaño mínimo alto
         """
         results = {"sample_name": name, "n": len(data)}
         
@@ -497,16 +498,57 @@ class StatisticalTestSuite:
             except Exception as e:
                 results["dagostino"] = {"error": str(e)}
         
+        # Anderson-Darling
+        try:
+            ad_result = scipy_stats.anderson(data, dist='norm')
+            # Anderson-Darling returns statistic and critical values at significance levels
+            # [15%, 10%, 5%, 2.5%, 1%]
+            sig_levels = [15, 10, 5, 2.5, 1]
+            critical_values = {}
+            is_normal_ad = True
+            for sl, cv in zip(sig_levels, ad_result.critical_values):
+                reject = bool(ad_result.statistic > cv)
+                critical_values[f"{sl}%"] = {
+                    "critical_value": round(float(cv), 6),
+                    "reject_null": reject,
+                }
+                if sl == 5:
+                    is_normal_ad = not reject
+            
+            results["anderson_darling"] = {
+                "statistic": round(float(ad_result.statistic), 6),
+                "critical_values": critical_values,
+                "is_normal": is_normal_ad,
+                "description": (
+                    "Anderson-Darling test. H0: data is normally distributed. "
+                    "Reject H0 if statistic > critical value at chosen significance level."
+                )
+            }
+        except Exception as e:
+            results["anderson_darling"] = {"error": str(e)}
+        
         # Descriptive stats
         results["skewness"] = round(float(scipy_stats.skew(data)), 4)
         results["kurtosis"] = round(float(scipy_stats.kurtosis(data)), 4)
         
-        # Recommendation
-        is_normal = results.get("shapiro_wilk", {}).get("is_normal", False)
+        # Recommendation based on consensus of tests
+        shapiro_normal = results.get("shapiro_wilk", {}).get("is_normal", False)
+        dagostino_normal = results.get("dagostino", {}).get("is_normal", True)  # default True if not run
+        ad_normal = results.get("anderson_darling", {}).get("is_normal", False)
+        
+        # Count how many tests say it's normal
+        test_results = [shapiro_normal, ad_normal]
+        if "dagostino" in results and "error" not in results["dagostino"]:
+            test_results.append(dagostino_normal)
+        
+        normal_count = sum(test_results)
+        total_tests = len(test_results)
+        is_normal = normal_count > total_tests / 2
+        
         results["recommendation"] = (
-            "Data appears normally distributed → parametric tests are valid."
+            f"Data appears normally distributed ({normal_count}/{total_tests} tests agree) → parametric tests are valid."
             if is_normal else
-            "Data is NOT normally distributed → use non-parametric tests (Wilcoxon, Friedman)."
+            f"Data is NOT normally distributed ({total_tests - normal_count}/{total_tests} tests reject normality) → use non-parametric tests (Wilcoxon, Friedman)."
         )
         
         return results
