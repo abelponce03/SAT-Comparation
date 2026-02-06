@@ -273,4 +273,65 @@ export const analysisApi = {
   },
 };
 
+// ==================== RIGOROUS ANALYSIS API ====================
+
+export const rigorousApi = {
+  getFullAnalysis: async (experimentId: number, timeout = 300, bootstrapN = 5000): Promise<any> => {
+    const params = new URLSearchParams({
+      timeout: timeout.toString(),
+      bootstrap_n: bootstrapN.toString(),
+    });
+    const { data } = await api.get(`/rigorous/full-analysis/${experimentId}?${params}`);
+    return data;
+  },
+
+  getMetrics: async (experimentId: number, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/metrics/${experimentId}?timeout=${timeout}`);
+    return data;
+  },
+
+  getStatisticalTests: async (experimentId: number, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/statistical-tests/${experimentId}?timeout=${timeout}`);
+    return data;
+  },
+
+  getBootstrap: async (experimentId: number, timeout = 300, nBootstrap = 5000): Promise<any> => {
+    const params = new URLSearchParams({
+      timeout: timeout.toString(),
+      n_bootstrap: nBootstrap.toString(),
+    });
+    const { data } = await api.get(`/rigorous/bootstrap/${experimentId}?${params}`);
+    return data;
+  },
+
+  getPlots: async (experimentId: number, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/plots/${experimentId}?timeout=${timeout}`);
+    return data;
+  },
+
+  getSinglePlot: async (experimentId: number, plotName: string, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/plots/${experimentId}/${plotName}?timeout=${timeout}`);
+    return data;
+  },
+
+  getReportUrl: (experimentId: number, timeout = 300): string => {
+    return `${api.defaults.baseURL}/rigorous/report/${experimentId}?timeout=${timeout}`;
+  },
+
+  getNormality: async (experimentId: number, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/normality/${experimentId}?timeout=${timeout}`);
+    return data;
+  },
+
+  getEffectSizes: async (experimentId: number, timeout = 300): Promise<any> => {
+    const { data } = await api.get(`/rigorous/effect-sizes/${experimentId}?timeout=${timeout}`);
+    return data;
+  },
+
+  getAvailableAnalyses: async (): Promise<any> => {
+    const { data } = await api.get('/rigorous/available-analyses');
+    return data;
+  },
+};
+
 export default api;

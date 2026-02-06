@@ -44,12 +44,34 @@ PRE_CONFIGURED_SOLVERS = {
         "features": ["CDCL", "Conflict clause learning", "Variable activity", "Two-literal watching"],
         "website": "http://minisat.se/",
         "category": "educational"
+    },
+    "cadical": {
+        "id": 3,
+        "name": "CaDiCaL",
+        "version": "2.1.3",
+        "description": "CaDiCaL - Conflict-Driven Clause Learning SAT Solver by Armin Biere. "
+                       "Advanced CDCL with chronological backtracking. Multiple SAT Competition wins.",
+        "executable_path": "/app/solvers/cadical/build/cadical",
+        "run_command_template": "{executable} {input_file}",
+        "status": "not_installed",
+        "features": ["CDCL", "Chronological backtracking", "Inprocessing", "Vivification", "Lucky phases"],
+        "website": "https://github.com/arminbiere/cadical",
+        "category": "competition"
+    },
+    "cryptominisat": {
+        "id": 4,
+        "name": "CryptoMiniSat",
+        "version": "5.11.22",
+        "description": "CryptoMiniSat - Advanced SAT solver with XOR reasoning by Mate Soos. "
+                       "Excels on cryptographic and structured instances with Gaussian elimination.",
+        "executable_path": "/app/solvers/cryptominisat/build/cryptominisat5",
+        "run_command_template": "{executable} {input_file}",
+        "status": "not_installed",
+        "features": ["CDCL", "XOR reasoning", "Gaussian elimination", "Component caching", "SQL logging"],
+        "website": "https://github.com/msoos/cryptominisat",
+        "category": "competition"
     }
 }
-
-# Future solvers can be added here:
-# "cadical": { ... },
-# "glucose": { ... },
 
 
 # ==================== HELPER FUNCTIONS ====================

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-from app.api import solvers, benchmarks, experiments, analysis, dashboard, ai_assistant
+from app.api import solvers, benchmarks, experiments, analysis, dashboard, ai_assistant, rigorous_analysis
 from app.core.database import DatabaseManager
 from app.core.config import settings
 
@@ -78,6 +78,7 @@ app.include_router(solvers.router, prefix="/api/solvers", tags=["Solvers"])
 app.include_router(benchmarks.router, prefix="/api/benchmarks", tags=["Benchmarks"])
 app.include_router(experiments.router, prefix="/api/experiments", tags=["Experiments"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+app.include_router(rigorous_analysis.router, prefix="/api/rigorous", tags=["Rigorous Analysis"])
 app.include_router(ai_assistant.router, prefix="/api/ai", tags=["AI Assistant"])
 
 

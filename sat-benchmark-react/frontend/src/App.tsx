@@ -7,6 +7,7 @@ import Experiments from './pages/Experiments'
 import ExperimentDetail from './pages/ExperimentDetail'
 import Analysis from './pages/Analysis'
 import Visualization from './pages/Visualization'
+import RigorousAnalysis from './pages/RigorousAnalysis'
 import AIAssistant from './pages/AIAssistant'
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
         <Route path="experiments/:id" element={<ExperimentDetail />} />
         <Route path="analysis" element={<Analysis />} />
         <Route path="visualization" element={<Visualization />} />
+        <Route path="rigorous" element={<RigorousAnalysis />} />
         <Route path="ai" element={<AIAssistant />} />
       </Route>
     </Routes>
