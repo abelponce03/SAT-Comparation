@@ -432,7 +432,7 @@ El corazón del sistema es su pipeline de análisis estadístico, implementado s
 La métrica estándar de la SAT Competition. Para cada instancia no resuelta dentro del timeout *T*, se asigna una penalización de *2T*:
 
 $$
-PAR\text{-}2(s) = \frac{1}{n}\sum_{i=1}^{n} t_i^{*}, \quad t_i^{*} = \begin{cases} t_i & \text{si resuelto} \\\\ 2T & \text{si timeout} \end{cases}
+PAR\text{-}2(s) = \frac{1}{n}\sum_{i=1}^{n} t_i^{*}, \quad t_i^{*} = \begin{cases} t_i & \text{si resuelto} \\ 2T & \text{si timeout} \end{cases}
 $$
 
 Se implementa también **PAR-10** (penalización ×10) para compatibilidad con estudios que usan esta variante más agresiva.
