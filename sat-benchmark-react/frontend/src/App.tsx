@@ -7,7 +7,7 @@ import Experiments from './pages/Experiments'
 import ExperimentDetail from './pages/ExperimentDetail'
 import Analysis from './pages/Analysis'
 import Visualization from './pages/Visualization'
-import AIAssistant from './pages/AIAssistant'
+import SATModeler from './pages/SATModeler'
 
 function App() {
   return (
@@ -20,7 +20,7 @@ function App() {
         <Route path="experiments/:id" element={<ExperimentDetail />} />
         <Route path="analysis" element={<Analysis />} />
         <Route path="visualization" element={<Visualization />} />
-        <Route path="ai" element={<AIAssistant />} />
+        <Route path="modeler" element={<SATModeler />} />
       </Route>
     </Routes>
   )

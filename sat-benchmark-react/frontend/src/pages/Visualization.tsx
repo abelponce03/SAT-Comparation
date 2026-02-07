@@ -634,23 +634,25 @@ function ECDFPlot({ data, isLoading, logScale }: { data: any; isLoading: boolean
 function BarSummary({ data, isLoading, solvedCounts }: {
   data: any; isLoading: boolean; solvedCounts: any;
 }) {
-  if (isLoading) return <LoadingSpinner text="Calculando PAR-2..." />;
-  if (!data) return null;
-
-  const par2Scores = data?.par2_scores || {};
-  const solvers = Object.keys(par2Scores);
-
-  const barData = useMemo(() =>
-    solvers
-      .map(s => ({
-        solver: s,
-        par2: par2Scores[s] || 0,
-        solved: solvedCounts[s]?.solved || 0,
-        total: solvedCounts[s]?.total || 0,
-        solved_pct: solvedCounts[s]?.solved_pct || 0,
+  // Build bar data from the rankings array returned by backend
+  const barData = useMemo(() => {
+    if (!data?.rankings) return [];
+    return (data.rankings as any[])
+      .map((r: any, i: number) => ({
+        solver: r.solver_name,
+        par2: r.par2_score ?? 0,
+        solved: r.solved ?? solvedCounts[r.solver_name]?.solved ?? 0,
+        total: r.total ?? solvedCounts[r.solver_name]?.total ?? 0,
+        solved_pct:
+          r.total > 0
+            ? Math.round(((r.solved ?? 0) / r.total) * 100)
+            : solvedCounts[r.solver_name]?.solved_pct ?? 0,
       }))
-      .sort((a, b) => a.par2 - b.par2),
-  [par2Scores, solvedCounts, solvers]);
+      .sort((a: any, b: any) => a.par2 - b.par2);
+  }, [data, solvedCounts]);
+
+  if (isLoading) return <LoadingSpinner text="Calculando PAR-2..." />;
+  if (!data?.rankings || barData.length === 0) return <EmptyState title="Sin datos PAR-2" description="No hay resultados de PAR-2 disponibles para este experimento." />;
 
   return (
     <div className="space-y-4">

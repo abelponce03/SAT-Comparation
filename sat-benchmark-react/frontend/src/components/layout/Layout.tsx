@@ -12,7 +12,7 @@ import {
   BookOpen,
   Zap,
   ChevronRight,
-  Brain
+  Code2
 } from 'lucide-react';
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -24,7 +24,7 @@ const navigation = [
   { name: 'Experiments', href: '/experiments', icon: FlaskConical, description: 'Ejecutar pruebas' },
   { name: 'Analysis', href: '/analysis', icon: BarChart3, description: 'Análisis estadístico completo' },
   { name: 'Visualization', href: '/visualization', icon: LineChart, description: 'Gráficos y visuales' },
-  { name: 'AI Assistant', href: '/ai', icon: Brain, description: 'Generar CNF con IA' },
+  { name: 'SAT Modeler', href: '/modeler', icon: Code2, description: 'Modelar y resolver SAT' },
 ];
 
 export default function Layout() {
