@@ -7,7 +7,7 @@
 ---
 
 **Autor:** Abel  
-**Fecha:** Febrero 2025  
+**Fecha:** Febrero 2026  
 **Versión del Sistema:** 2.0  
 
 </div>
@@ -274,6 +274,40 @@ La aplicación está organizada en **7 módulos principales**, cada uno con su p
 | 9 | **Normality Tests** | Shapiro-Wilk, D'Agostino-Pearson, Anderson-Darling |
 | 10 | **CSV Export** | Exportación de cualquier tabla de análisis (10+ formatos) |
 
+#### Ejemplos del Módulo de Análisis
+
+A continuación se muestran capturas reales de las pestañas del módulo de análisis con datos del experimento "Benchmark Completo":
+
+![Analysis PAR-2](screenshots/analysis_par2.png)
+*Figura 6a: Pestaña PAR-2 — Ranking de solvers con scores PAR-2, número de instancias resueltas y métricas de rendimiento.*
+
+![Analysis VBS](screenshots/analysis_vbs.png)
+*Figura 6b: Pestaña VBS — Análisis del Virtual Best Solver, mostrando el rendimiento teórico óptimo y la contribución de cada solver.*
+
+![Analysis Pairwise](screenshots/analysis_pairwise.png)
+*Figura 6c: Pestaña Pares — Comparación detallada entre pares de solvers con wins/losses y tiempos relativos.*
+
+![Analysis Families](screenshots/analysis_families.png)
+*Figura 6d: Pestaña Familias — Rendimiento desglosado por familia de benchmarks (circuit, crafted, other, etc.).*
+
+![Analysis Normality](screenshots/analysis_normality.png)
+*Figura 6e: Pestaña Normalidad — Tests de Shapiro-Wilk, D'Agostino-Pearson y Anderson-Darling para verificar la distribución de los tiempos.*
+
+![Analysis Tests](screenshots/analysis_tests.png)
+*Figura 6f: Pestaña Tests — Resultados de tests estadísticos (Wilcoxon, Mann-Whitney U, Friedman) con p-valores e interpretación.*
+
+![Analysis Effect Sizes](screenshots/analysis_effect_sizes.png)
+*Figura 6g: Pestaña Efecto — Tamaños de efecto Cohen's d y Vargha-Delaney A para cuantificar la magnitud práctica de las diferencias.*
+
+![Analysis Bootstrap](screenshots/analysis_bootstrap.png)
+*Figura 6h: Pestaña Bootstrap — Intervalos de confianza BCa (Bias-Corrected and Accelerated) calculados con 10,000 réplicas.*
+
+![Analysis Plots](screenshots/analysis_plots.png)
+*Figura 6i: Pestaña Gráficos — Visualizaciones publicables generadas con Matplotlib/Seaborn (cactus, ECDF, boxplot, etc.).*
+
+![Analysis Report](screenshots/analysis_report.png)
+*Figura 6j: Pestaña Informe — Generación de reportes HTML/PDF standalone con todos los análisis embebidos.*
+
 ---
 
 ### 4.6 Visualization
@@ -294,6 +328,25 @@ La aplicación está organizada en **7 módulos principales**, cada uno con su p
 | **Heatmap** | Matriz solver × benchmark con tiempos codificados por color | Vista detallada por instancia |
 
 Todos los gráficos incluyen tooltips interactivos, selección de solvers/experimentos, y colores consistentes por solver.
+
+#### Ejemplos de Visualizaciones
+
+A continuación se muestran capturas reales de cada tipo de gráfico generado con datos del experimento "Benchmark Completo" (Kissat 4.0.4 vs MiniSat 2.2.0, 32 instancias CNF):
+
+![Cactus Plot](screenshots/viz_cactus_plot.png)
+*Figura 7a: Cactus Plot — Curva acumulativa de instancias resueltas vs. tiempo. Permite comparar de un vistazo qué solver resuelve más instancias y en cuánto tiempo.*
+
+![Scatter Plot](screenshots/viz_scatter_plot.png)
+*Figura 7b: Scatter Plot — Comparación pairwise de tiempos. Los puntos por encima de la diagonal indican que el solver del eje Y fue más lento.*
+
+![ECDF](screenshots/viz_ecdf.png)
+*Figura 7c: ECDF (Empirical Cumulative Distribution Function) — Perfil de rendimiento que muestra la probabilidad acumulada de resolver una instancia dentro de un tiempo dado.*
+
+![PAR-2 / Solved](screenshots/viz_par2_solved.png)
+*Figura 7d: PAR-2 / Solved — Ranking rápido mostrando el score PAR-2 (menor es mejor) y el número de instancias resueltas por cada solver.*
+
+![Heatmap](screenshots/viz_heatmap.png)
+*Figura 7e: Heatmap — Mapa de calor que muestra los tiempos de resolución por solver y benchmark, codificados por intensidad de color.*
 
 ---
 
@@ -337,7 +390,9 @@ El corazón del sistema es su pipeline de análisis estadístico, implementado s
 
 La métrica estándar de la SAT Competition. Para cada instancia no resuelta dentro del timeout *T*, se asigna una penalización de *2T*:
 
-$$PAR\text{-}2(s) = \frac{\sum_{i=1}^{n} t_i^{*}}{n}, \quad t_i^{*} = \begin{cases} t_i & \text{si resuelto} \\ 2T & \text{si timeout} \end{cases}$$
+$$
+PAR\text{-}2(s) = \frac{1}{n}\sum_{i=1}^{n} t_i^{*}, \quad t_i^{*} = \begin{cases} t_i & \text{si resuelto} \\\\ 2T & \text{si timeout} \end{cases}
+$$
 
 Se implementa también **PAR-10** (penalización ×10) para compatibilidad con estudios que usan esta variante más agresiva.
 
@@ -345,7 +400,9 @@ Se implementa también **PAR-10** (penalización ×10) para compatibilidad con e
 
 El VBS selecciona, para cada instancia, el mejor tiempo entre todos los solvers:
 
-$$VBS(i) = \min_{s \in S} t_s(i)$$
+$$
+VBS(i) = \min_{s \in S} \; t_s(i)
+$$
 
 Esto establece un **upper bound** teórico del rendimiento alcanzable mediante portfolio selection.
 
@@ -408,9 +465,11 @@ Más allá de la significancia estadística (p-valor), se cuantifica la **magnit
 
 #### Cohen's d
 
-$$d = \frac{\bar{X}_1 - \bar{X}_2}{s_p}$$
+$$
+d = \frac{\bar{X}_1 - \bar{X}_2}{s_p}
+$$
 
-donde $s_p$ es la desviación estándar pooled.
+donde $s_p$ es la desviación estándar pooled (combinada).
 
 | d | Interpretación |
 |---|---------------|
@@ -605,8 +664,8 @@ solve_stmt   ::= "solve" "satisfy" ";"
 expression   ::= equiv_expr
 equiv_expr   ::= impl_expr ("<->" impl_expr)*
 impl_expr    ::= or_expr ("->" or_expr)*
-or_expr      ::= and_expr (("\\/" | "or") and_expr)*
-and_expr     ::= xor_expr (("/\\" | "and") xor_expr)*
+or_expr      ::= and_expr (("\/" | "or") and_expr)*
+and_expr     ::= xor_expr (("/\" | "and") xor_expr)*
 xor_expr     ::= not_expr ("xor" not_expr)*
 not_expr     ::= ("not" | "~" | "!") not_expr | primary
 primary      ::= identifier | "true" | "false" | "(" expression ")"
@@ -884,6 +943,6 @@ SAT Benchmark Suite v2.0 logra integrar en una sola plataforma web:
 <div align="center">
 
 *Informe generado para el proyecto SAT Benchmark Suite v2.0*  
-*Febrero 2025*
+*Febrero 2026*
 
 </div>
