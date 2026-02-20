@@ -50,6 +50,16 @@ export const solversApi = {
     const { data } = await api.get('/solvers/comparison-matrix');
     return data;
   },
+
+  install: async (solverKey: string) => {
+    const { data } = await api.post('/solvers/install', { solver_key: solverKey });
+    return data;
+  },
+
+  uninstall: async (solverKey: string) => {
+    const { data } = await api.post(`/solvers/uninstall/${solverKey}`);
+    return data;
+  },
 };
 
 // ==================== Benchmarks ====================

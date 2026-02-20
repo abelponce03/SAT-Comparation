@@ -12,11 +12,19 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# Pre-configured solver names for mapping (mirrors solvers.py)
-PRE_CONFIGURED_SOLVER_NAMES = {
-    1: "Kissat",
-    2: "MiniSat"
-}
+
+def _get_solver_names() -> dict:
+    """Dynamically get solver name mappings from the plugin registry."""
+    try:
+        from app.solvers import solver_registry
+        return solver_registry.get_name_map()
+    except Exception:
+        # Fallback during early init or if registry is not available
+        return {}
+
+
+# Backwards-compatible alias
+PRE_CONFIGURED_SOLVER_NAMES = None  # will use _get_solver_names() dynamically
 
 
 class DatabaseManager:
@@ -578,10 +586,11 @@ class DatabaseManager:
         runs = [dict(row) for row in cursor.fetchall()]
         conn.close()
         
-        # Map solver names from pre-configured solvers if Unknown
+        # Map solver names from the solver plugin registry when missing
+        name_map = _get_solver_names()
         for run in runs:
             if run.get('solver_name') == 'Unknown':
-                run['solver_name'] = PRE_CONFIGURED_SOLVER_NAMES.get(run['solver_id'], 'Unknown')
+                run['solver_name'] = name_map.get(run['solver_id'], 'Unknown')
         
         return runs
     

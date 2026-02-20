@@ -4,7 +4,7 @@ Dashboard API endpoints
 
 from fastapi import APIRouter, Depends, Request
 from typing import Dict
-from app.api.solvers import PRE_CONFIGURED_SOLVERS
+from app.solvers import solver_registry
 from pathlib import Path
 import os
 
@@ -17,14 +17,9 @@ async def get_dashboard_stats(request: Request) -> Dict:
     db = request.app.state.db
     stats = db.get_dashboard_stats()
     
-    # Override solver counts with pre-configured solvers
-    total_solvers = len(PRE_CONFIGURED_SOLVERS)
-    ready_solvers = sum(1 for s in PRE_CONFIGURED_SOLVERS.values() 
-                        if Path(s['executable_path']).exists() and 
-                        os.access(s['executable_path'], os.X_OK))
-    
-    stats['total_solvers'] = total_solvers
-    stats['ready_solvers'] = ready_solvers
+    # Override solver counts with plugin registry data
+    stats['total_solvers'] = solver_registry.count
+    stats['ready_solvers'] = solver_registry.ready_count
     
     return stats
 

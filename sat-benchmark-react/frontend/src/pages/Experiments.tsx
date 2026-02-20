@@ -456,11 +456,13 @@ function CreateExperimentForm({ onSuccess }: { onSuccess: () => void }) {
                   type="checkbox"
                   checked={formData.solver_ids.includes(solver.id)}
                   onChange={(e) => {
-                    if (e.target.checked) {
-                      setFormData({ ...formData, solver_ids: [...formData.solver_ids, solver.id] });
-                    } else {
-                      setFormData({ ...formData, solver_ids: formData.solver_ids.filter(id => id !== solver.id) });
-                    }
+                    const checked = e.target.checked;
+                    setFormData(prev => ({
+                      ...prev,
+                      solver_ids: checked
+                        ? [...prev.solver_ids, solver.id]
+                        : prev.solver_ids.filter(id => id !== solver.id)
+                    }));
                   }}
                   className="rounded"
                 />
@@ -513,13 +515,13 @@ function CreateExperimentForm({ onSuccess }: { onSuccess: () => void }) {
                   <th className="p-2 text-left">
                     <input
                       type="checkbox"
-                      checked={formData.benchmark_ids.length === benchmarks?.length}
+                      checked={benchmarks != null && benchmarks.length > 0 && formData.benchmark_ids.length === benchmarks.length}
                       onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({ ...formData, benchmark_ids: benchmarks?.map(b => b.id) || [] });
-                        } else {
-                          setFormData({ ...formData, benchmark_ids: [] });
-                        }
+                        const checked = e.target.checked;
+                        setFormData(prev => ({
+                          ...prev,
+                          benchmark_ids: checked ? (benchmarks?.map(b => b.id) || []) : []
+                        }));
                       }}
                     />
                   </th>
@@ -529,18 +531,20 @@ function CreateExperimentForm({ onSuccess }: { onSuccess: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {benchmarks?.slice(0, 100).map((benchmark) => (
-                  <tr key={benchmark.id} className="border-t">
+                {benchmarks?.map((benchmark) => (
+                  <tr key={benchmark.id} className="border-t border-dark-700">
                     <td className="p-2">
                       <input
                         type="checkbox"
                         checked={formData.benchmark_ids.includes(benchmark.id)}
                         onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({ ...formData, benchmark_ids: [...formData.benchmark_ids, benchmark.id] });
-                          } else {
-                            setFormData({ ...formData, benchmark_ids: formData.benchmark_ids.filter(id => id !== benchmark.id) });
-                          }
+                          const checked = e.target.checked;
+                          setFormData(prev => ({
+                            ...prev,
+                            benchmark_ids: checked
+                              ? [...prev.benchmark_ids, benchmark.id]
+                              : prev.benchmark_ids.filter(id => id !== benchmark.id)
+                          }));
                         }}
                       />
                     </td>

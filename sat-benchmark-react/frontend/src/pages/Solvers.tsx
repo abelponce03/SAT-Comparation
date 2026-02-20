@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
   Cpu, 
   CheckCircle2, 
@@ -9,7 +9,10 @@ import {
   Trophy,
   ChevronRight,
   Play,
-  Loader2
+  Loader2,
+  Download,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -19,6 +22,7 @@ import { StatusBadge } from '@/components/common/Badge';
 
 interface Solver {
   id: number;
+  key?: string;
   name: string;
   version: string;
   description: string;
@@ -41,6 +45,8 @@ interface ComparisonSolver {
 }
 
 export default function Solvers() {
+  const queryClient = useQueryClient();
+
   // Queries
   const { data: solvers, isLoading: loadingSolvers } = useQuery({
     queryKey: ['solvers'],
@@ -64,12 +70,36 @@ export default function Solvers() {
     onError: () => toast.error('Error al probar solver'),
   });
 
+  const installMutation = useMutation({
+    mutationFn: (solverKey: string) => solversApi.install(solverKey),
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(data.message || 'Solver instalado correctamente');
+        queryClient.invalidateQueries({ queryKey: ['solvers'] });
+        queryClient.invalidateQueries({ queryKey: ['solver-comparison'] });
+      } else {
+        toast.error(data.error || data.message || 'Error al instalar solver');
+      }
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Error al instalar solver'),
+  });
+
+  const uninstallMutation = useMutation({
+    mutationFn: (solverKey: string) => solversApi.uninstall(solverKey),
+    onSuccess: () => {
+      toast.success('Solver desinstalado');
+      queryClient.invalidateQueries({ queryKey: ['solvers'] });
+      queryClient.invalidateQueries({ queryKey: ['solver-comparison'] });
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.detail || 'Error al desinstalar'),
+  });
+
   if (loadingSolvers) {
     return <LoadingSpinner size="lg" text="Cargando solvers..." />;
   }
 
   const readySolvers = solvers?.filter((s: Solver) => s.status === 'ready') || [];
-  const unavailableSolvers = solvers?.filter((s: Solver) => s.status === 'unavailable') || [];
+  const unavailableSolvers = solvers?.filter((s: Solver) => s.status !== 'ready') || [];
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -83,7 +113,7 @@ export default function Solvers() {
             SAT Solvers
           </h1>
           <p className="text-gray-400 mt-2">
-            Solvers pre-configurados listos para benchmarking
+            Sistema de plugins dinámico — instala y gestiona solvers SAT
           </p>
         </div>
         
@@ -107,11 +137,12 @@ export default function Solvers() {
             <BookOpen className="w-6 h-6 text-primary-400" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white mb-2">Solvers Pre-compilados</h3>
+            <h3 className="text-lg font-semibold text-white mb-2">Sistema de Plugins de Solvers</h3>
             <p className="text-gray-400 text-sm leading-relaxed">
-              Esta instalación utiliza solvers SAT pre-compilados y optimizados. 
-              Los solvers están listos para ejecutar experimentos de benchmarking sin necesidad de configuración adicional.
-              Para agregar nuevos solvers, contacta al administrador del sistema.
+              Los solvers se gestionan mediante un sistema de plugins dinámico.
+              Puedes instalar nuevos solvers directamente desde la interfaz con un solo clic.
+              Los solvers no instalados pueden compilarse automáticamente desde su código fuente.
+              Para añadir un solver personalizado, crea un archivo plugin en <code className="text-primary-300">app/solvers/plugins/</code>.
             </p>
           </div>
         </div>
@@ -125,6 +156,10 @@ export default function Solvers() {
             solver={solver}
             onTest={() => testMutation.mutate(solver.id)}
             isTestLoading={testMutation.isPending}
+            onInstall={() => solver.key && installMutation.mutate(solver.key)}
+            isInstalling={installMutation.isPending}
+            onUninstall={() => solver.key && uninstallMutation.mutate(solver.key)}
+            isUninstalling={uninstallMutation.isPending}
           />
         ))}
       </div>
@@ -324,11 +359,19 @@ return SAT;`}
 function SolverCard({ 
   solver,
   onTest,
-  isTestLoading
+  isTestLoading,
+  onInstall,
+  isInstalling,
+  onUninstall,
+  isUninstalling
 }: { 
   solver: Solver;
   onTest: () => void;
   isTestLoading: boolean;
+  onInstall: () => void;
+  isInstalling: boolean;
+  onUninstall: () => void;
+  isUninstalling: boolean;
 }) {
   const getCategoryIcon = (category: string) => {
     switch (category) {
@@ -398,6 +441,16 @@ function SolverCard({
               <CheckCircle2 className="w-4 h-4 text-green-400" />
               <span className="text-sm text-green-400">Listo para usar</span>
             </>
+          ) : solver.status === 'not_installed' ? (
+            <>
+              <Download className="w-4 h-4 text-blue-400" />
+              <span className="text-sm text-blue-400">Disponible para instalar</span>
+            </>
+          ) : solver.status === 'installing' ? (
+            <>
+              <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" />
+              <span className="text-sm text-yellow-400">Instalando...</span>
+            </>
           ) : (
             <>
               <AlertCircle className="w-4 h-4 text-yellow-400" />
@@ -407,6 +460,23 @@ function SolverCard({
         </div>
         
         <div className="flex items-center gap-2">
+          {/* Install button — shown when solver is not installed */}
+          {(solver.status === 'not_installed' || solver.status === 'error' || solver.status === 'unavailable') && solver.key && (
+            <button
+              onClick={onInstall}
+              disabled={isInstalling}
+              className="px-3 py-1.5 bg-green-900/50 border border-green-600/50 text-green-300 text-sm rounded-lg hover:bg-green-800/50 transition-colors flex items-center gap-2"
+            >
+              {isInstalling ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              {isInstalling ? 'Instalando...' : 'Instalar'}
+            </button>
+          )}
+
+          {/* Test button — shown when ready */}
           {solver.status === 'ready' && (
             <button
               onClick={onTest}
@@ -421,6 +491,7 @@ function SolverCard({
               Probar
             </button>
           )}
+
           <a
             href={solver.website}
             target="_blank"

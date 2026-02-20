@@ -15,6 +15,7 @@ import json
 import logging
 
 from .solvers import PRE_CONFIGURED_SOLVERS, get_solver_by_id
+from app.solvers import solver_registry
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +283,8 @@ async def run_experiment_task(
     
     try:
         for solver_id in solver_ids:
-            # Use pre-configured solvers instead of database
+            # Use plugin registry to get the solver
+            plugin = solver_registry.get_by_id(solver_id)
             solver = get_solver_by_id(solver_id)
             logger.info(f"Processing solver_id={solver_id}, found={solver is not None}")
             
@@ -291,8 +293,8 @@ async def run_experiment_task(
                 continue
             
             # Verify executable exists
-            if not os.path.isfile(solver['executable_path']):
-                logger.warning(f"Solver executable not found at {solver['executable_path']}, skipping")
+            if not plugin or not plugin.is_installed():
+                logger.warning(f"Solver executable not found for {solver.get('name', solver_id)}, skipping")
                 continue
             
             logger.info(f"Running solver {solver['name']} on {len(benchmark_ids)} benchmarks")
@@ -312,13 +314,13 @@ async def run_experiment_task(
                     active_experiments[experiment_id]['current_solver'] = solver['name']
                     active_experiments[experiment_id]['current_benchmark'] = benchmark['filename']
                 
-                # Run solver
-                result = await run_solver(
-                    solver['executable_path'],
+                # Run solver via plugin system
+                run_result = await plugin.run(
                     benchmark['filepath'],
-                    timeout,
-                    memory_limit
+                    timeout=timeout,
+                    memory_limit_mb=memory_limit,
                 )
+                result = run_result.to_dict()
                 
                 logger.info(f"Solver {solver['name']} on {benchmark['filename']}: {result['result']} in {result['wall_time_seconds']:.2f}s")
                 
@@ -364,154 +366,6 @@ async def run_experiment_task(
         # Clean up tracking
         if experiment_id in active_experiments:
             del active_experiments[experiment_id]
-
-
-async def run_solver(
-    executable: str,
-    benchmark_path: str,
-    timeout: int,
-    memory_limit: int
-) -> Dict:
-    """Execute a solver on a benchmark"""
-    result = {
-        'result': 'UNKNOWN',
-        'exit_code': -1,
-        'wall_time_seconds': 0,
-        'cpu_time_seconds': 0,
-        'max_memory_kb': 0,
-        'conflicts': None,
-        'decisions': None,
-        'propagations': None,
-        'restarts': None,
-        'solver_output': '',
-        'error_message': ''
-    }
-    
-    try:
-        start_time = time.time()
-        
-        process = await asyncio.create_subprocess_exec(
-            executable,
-            benchmark_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout
-            )
-            
-            wall_time = time.time() - start_time
-            
-            result['exit_code'] = process.returncode
-            result['wall_time_seconds'] = wall_time
-            result['solver_output'] = stdout.decode('utf-8', errors='ignore')[:10000]
-            
-            # Parse result from output/exit code
-            output = result['solver_output'].upper()
-            if process.returncode == 10 or 'SATISFIABLE' in output:
-                result['result'] = 'SAT'
-            elif process.returncode == 20 or 'UNSATISFIABLE' in output:
-                result['result'] = 'UNSAT'
-            elif process.returncode == 0:
-                result['result'] = 'UNKNOWN'
-            
-            # Parse statistics from output
-            result.update(parse_solver_stats(result['solver_output']))
-            
-        except asyncio.TimeoutError:
-            process.kill()
-            result['result'] = 'TIMEOUT'
-            result['wall_time_seconds'] = timeout
-            result['error_message'] = 'Timeout exceeded'
-            
-    except Exception as e:
-        result['result'] = 'ERROR'
-        result['error_message'] = str(e)
-    
-    return result
-
-
-def parse_solver_stats(output: str) -> Dict:
-    """Parse solver statistics from output - comprehensive extraction"""
-    import re
-    
-    stats = {}
-    
-    # Common patterns for various solvers
-    patterns = {
-        # Basic CDCL metrics
-        'conflicts': r'conflicts\s*[:\s]+(\d+)',
-        'decisions': r'decisions\s*[:\s]+(\d+)',
-        'propagations': r'propagations\s*[:\s]+(\d+)',
-        'restarts': r'restarts\s*[:\s]+(\d+)',
-        
-        # Learned clauses
-        'learnt_clauses': r'(?:learnt|learned)\s*(?:clauses|literals)?\s*[:\s]+(\d+)',
-        'deleted_clauses': r'(?:deleted|removed)\s*(?:clauses)?\s*[:\s]+(\d+)',
-        
-        # Memory (Kissat specific)
-        'max_memory_mb': r'maximum-resident-set-size:\s+(\d+)\s*bytes',
-        
-        # Additional Kissat metrics
-        'chronological': r'chronological:\s+(\d+)',
-        'vivified': r'vivified:\s+(\d+)',
-        'substituted': r'substituted:\s+(\d+)',
-        'congruent': r'congruent:\s+(\d+)',
-        'factored': r'factored:\s+(\d+)',
-        'iterations': r'iterations:\s+(\d+)',
-        'switched': r'switched:\s+(\d+)',
-        'walks': r'walks:\s+(\d+)',
-        
-        # MiniSat specific
-        'conflict_literals': r'conflict\s*literals\s*[:\s]+(\d+)',
-        'literals_deleted_pct': r'(\d+(?:\.\d+)?)\s*%\s*deleted',
-        
-        # CPU time from output
-        'cpu_time_output': r'(?:CPU|process)[- ]time[:\s]+(\d+\.?\d*)\s*(?:s|seconds)',
-        
-        # Reduction metrics
-        'reductions': r'reductions:\s+(\d+)',
-        'rephased': r'rephased:\s+(\d+)',
-    }
-    
-    for key, pattern in patterns.items():
-        match = re.search(pattern, output, re.IGNORECASE)
-        if match:
-            try:
-                value = match.group(match.lastindex)
-                # Handle percentage values
-                if '.' in value or key.endswith('_pct'):
-                    stats[key] = float(value)
-                else:
-                    stats[key] = int(value)
-            except:
-                pass
-    
-    # Convert memory from bytes to KB if found
-    if 'max_memory_mb' in stats:
-        stats['max_memory_kb'] = stats['max_memory_mb'] // 1024
-        del stats['max_memory_mb']
-    
-    # Extract CPU time from solver output if available
-    if 'cpu_time_output' in stats:
-        stats['cpu_time_seconds'] = stats['cpu_time_output']
-        del stats['cpu_time_output']
-    
-    # Calculate derived metrics
-    if stats.get('propagations') and stats.get('decisions'):
-        stats['propagations_per_decision'] = round(
-            stats['propagations'] / stats['decisions'], 2
-        )
-    
-    if stats.get('conflicts') and stats.get('restarts'):
-        stats['conflicts_per_restart'] = round(
-            stats['conflicts'] / stats['restarts'], 2
-        )
-    
-    return stats
 
 
 # ==================== WEBSOCKET FOR REAL-TIME UPDATES ====================

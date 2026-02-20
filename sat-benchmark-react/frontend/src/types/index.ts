@@ -1,18 +1,19 @@
 // Solver types
 export interface Solver {
   id: number;
+  key?: string;
   name: string;
   version: string | null;
   executable_path: string;
   source_path?: string | null;
   compile_command?: string | null;
-  run_command_template: string | null;
+  run_command_template?: string | null;
   last_compiled?: string | null;
-  status: 'ready' | 'needs_compile' | 'compiling' | 'error' | 'unavailable';
+  status: 'ready' | 'not_installed' | 'installing' | 'needs_compile' | 'compiling' | 'error' | 'unavailable';
   description: string | null;
   metadata?: Record<string, any> | null;
   created_at?: string;
-  // Pre-configured solver fields
+  // Plugin-provided fields
   features?: string[];
   website?: string;
   category?: string;
