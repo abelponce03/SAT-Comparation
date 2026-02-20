@@ -68,6 +68,9 @@ export function StatusBadge({ status }: { status: string }) {
     error: 'error',
     ready: 'success',
     not_configured: 'warning',
+    not_installed: 'gray',
+    installing: 'purple',
+    unavailable: 'warning',
   };
   
   const labels: Record<string, string> = {
@@ -78,9 +81,12 @@ export function StatusBadge({ status }: { status: string }) {
     error: 'Error',
     ready: 'Listo',
     not_configured: 'Sin configurar',
+    not_installed: 'No instalado',
+    installing: 'Instalando',
+    unavailable: 'No disponible',
   };
   
-  const isAnimated = status === 'running';
+  const isAnimated = status === 'running' || status === 'installing';
   
   return (
     <Badge variant={variants[status] || 'gray'} animated={isAnimated}>
