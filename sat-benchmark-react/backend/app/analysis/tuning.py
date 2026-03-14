@@ -168,3 +168,82 @@ class AlgorithmTuner:
         
         # Retorna el mejor candidato para guardarlo o utilizarlo (Ablation Analysis futuro)
         return incumbent
+
+class AblationAnalyzer:
+    """
+    Sub-módulo para ejecutar Análisis de Ablación post-Tuning [FH16].
+    Compara 1 a 1 los parámetros que fueron modificados con respecto al default,
+    determinando el beneficio (peso estadístico/mejora de PAR-2) asociado a cada hiperparámetro.
+    """
+    
+    def __init__(self, solver_name: str, instances: List[str], timeout_per_run: float = 300.0):
+        self.solver_name = solver_name
+        self.instances = instances
+        self.timeout_per_run = timeout_per_run
+        self.tuner = AlgorithmTuner(solver_name, instances, timeout_per_run)
+
+    def _get_default_config(self) -> Configuration:
+        return self.tuner.get_solver_config_space().get_default_configuration()
+
+    async def _evaluate_single_config(self, config: Configuration) -> float:
+        """ Evalúa el PAR-2 score de una configuración específica promediando sus instancias """
+        total_par2 = 0.0
+        # Promedio sobre las instancias de test
+        for instance in self.instances:
+            score = await self.tuner._async_evaluate(config, instance, self.timeout_per_run)
+            total_par2 += score
+        return total_par2 / max(1, len(self.instances))
+
+    async def analyze_ablation(self, incumbent_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ejecuta the ablation sequence (simplificada) from Default to Incumbent
+        """
+        cs = self.tuner.get_solver_config_space()
+        default_config = cs.get_default_configuration()
+        
+        incumbent_config = Configuration(cs, values=incumbent_dict)
+        
+        # 1. Base scores
+        default_score = await self._evaluate_single_config(default_config)
+        incumbent_score = await self._evaluate_single_config(incumbent_config)
+        
+        print(f"[Ablation] Default PAR-2: {default_score} | Incumbent PAR-2: {incumbent_score}")
+        
+        # 2. Encontramos parámetros que cambiaron
+        flipped_params = {}
+        for param in cs.get_hyperparameter_names():
+            def_val = default_config.get(param)
+            inc_val = incumbent_config.get(param)
+            if def_val != inc_val:
+                flipped_params[param] = {"default": def_val, "incumbent": inc_val}
+                
+        # 3. Flips 1-a-1 evaluando el impacto
+        # Calculamos cuál es la mejora si a la confiuguración default le ponemos SOLO ESE parámetro del incumbent
+        ablation_results = {}
+        total_improvement = default_score - incumbent_score
+        
+        for param, values in flipped_params.items():
+            test_dict = default_config.get_dictionary().copy()
+            test_dict[param] = values["incumbent"]
+            
+            test_config = Configuration(cs, values=test_dict)
+            test_score = await self._evaluate_single_config(test_config)
+            
+            improvement = default_score - test_score
+            ablation_results[param] = {
+                "default_value": values["default"],
+                "incumbent_value": values["incumbent"],
+                "par2_score": test_score,
+                "improvement": improvement,
+                "percentage_of_total_gain": (improvement / total_improvement * 100) if total_improvement > 0 else 0
+            }
+            
+        # Sort de mayor a menor impacto
+        sorted_ablation = dict(sorted(ablation_results.items(), key=lambda item: item[1]['improvement'], reverse=True))
+        
+        return {
+            "baseline_default_score": default_score,
+            "incumbent_score": incumbent_score,
+            "total_improvement": total_improvement,
+            "parameters_impact": sorted_ablation
+        }

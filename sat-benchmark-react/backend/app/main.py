@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-from app.api import solvers, benchmarks, experiments, analysis, dashboard, sat_modeler, rigorous_analysis
+from app.api import solvers, benchmarks, experiments, analysis, dashboard, sat_modeler, rigorous_analysis, tuning
 from app.core.database import DatabaseManager
 from app.core.config import settings
 
@@ -80,6 +80,7 @@ app.include_router(experiments.router, prefix="/api/experiments", tags=["Experim
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(rigorous_analysis.router, prefix="/api/rigorous", tags=["Rigorous Analysis"])
 app.include_router(sat_modeler.router, prefix="/api/modeler", tags=["SAT Modeler"])
+app.include_router(tuning.router, prefix="/api/tuning", tags=["Algorithm Configuration"])
 
 
 @app.get("/")
