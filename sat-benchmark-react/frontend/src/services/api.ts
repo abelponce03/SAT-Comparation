@@ -51,6 +51,16 @@ export const solversApi = {
     return data;
   },
 
+  getLibrary: async () => {
+    const { data } = await api.get('/solvers/library');
+    return data;
+  },
+
+  getCount: async () => {
+    const { data } = await api.get('/solvers/count');
+    return data;
+  },
+
   install: async (solverKey: string) => {
     const { data } = await api.post('/solvers/install', { solver_key: solverKey });
     return data;

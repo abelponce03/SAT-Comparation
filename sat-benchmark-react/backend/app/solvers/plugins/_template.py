@@ -1,19 +1,27 @@
 """
-Template for adding a new SAT Solver Plugin
-============================================
+Custom Solver Plugin Override (ADVANCED — usually NOT needed)
+=============================================================
 
-Copy this file, rename it to ``your_solver.py``, and fill in the
-properties and methods.  Place it in ``app/solvers/plugins/`` and
-it will be auto-discovered on startup.
+**Most solvers should be added via ``solver_definitions.yaml``** — no
+Python code required.  Just add a YAML block with the solver's name,
+repository URL, build commands, and metadata; restart the backend.
 
-Steps:
+This .py plugin mechanism is only needed when a solver requires truly
+custom logic that cannot be expressed as YAML build steps, such as:
+  - Custom output parsing beyond regex
+  - Dynamic library linking or runtime environment setup
+  - Multi-phase build orchestration with conditional logic
+
+How to use (advanced override):
   1. cp _template.py  my_solver.py
-  2. Edit all properties marked with TODO
-  3. Implement the install() method
-  4. Optionally override parse_stats() for solver-specific metrics
-  5. Restart the backend — the solver appears automatically
+  2. Edit the class — the ``key`` must match the YAML entry's key
+  3. Place it in ``app/solvers/plugins/`` and restart the backend
+  4. The .py plugin will automatically override the YAML definition
 
-No other files need to be changed.
+The YAML approach (recommended — no Python):
+  1. Open ``app/solvers/solver_definitions.yaml``
+  2. Add a new entry under ``solvers:``
+  3. Restart the backend — done!
 """
 
 from __future__ import annotations

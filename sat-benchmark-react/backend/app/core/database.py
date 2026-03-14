@@ -157,6 +157,13 @@ class DatabaseManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_runs_benchmark ON runs(benchmark_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_benchmarks_family ON benchmarks(family)")
         
+        # Migration: add extra_stats_json column if missing
+        cursor.execute("PRAGMA table_info(runs)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if "extra_stats_json" not in existing_cols:
+            cursor.execute("ALTER TABLE runs ADD COLUMN extra_stats_json TEXT")
+            logger.info("Migration: added extra_stats_json column to runs table")
+        
         conn.commit()
         conn.close()
         logger.info(f"Database initialized at {self.db_path}")
@@ -522,7 +529,7 @@ class DatabaseManager:
     
     def add_run(self, experiment_id: int, solver_id: int, benchmark_id: int,
                 result: str = None, **kwargs) -> int:
-        """Add a run result"""
+        """Add a run result.  Extra/unknown fields are captured in extra_stats_json."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -533,12 +540,22 @@ class DatabaseManager:
                        'user_time_seconds', 'system_time_seconds', 'max_memory_kb',
                        'avg_memory_kb', 'conflicts', 'decisions', 'propagations',
                        'restarts', 'learnt_clauses', 'deleted_clauses', 'hostname',
-                       'solver_output', 'error_message', 'par2_score']
+                       'solver_output', 'error_message', 'par2_score',
+                       'extra_stats_json']
         
-        for field in valid_fields:
-            if field in kwargs:
+        # Collect overflow fields into extra_stats_json
+        overflow: Dict[str, Any] = {}
+        for field, value in kwargs.items():
+            if field in valid_fields:
                 columns.append(field)
-                values.append(kwargs[field])
+                values.append(value)
+            elif field not in ('solver_name',):  # skip known non-DB fields
+                overflow[field] = value
+
+        # If there are overflow stats and no explicit extra_stats_json was provided
+        if overflow and 'extra_stats_json' not in columns:
+            columns.append('extra_stats_json')
+            values.append(json.dumps(overflow, default=str))
         
         placeholders = ', '.join(['?' for _ in columns])
         query = f"INSERT OR REPLACE INTO runs ({', '.join(columns)}) VALUES ({placeholders})"
@@ -591,6 +608,16 @@ class DatabaseManager:
         for run in runs:
             if run.get('solver_name') == 'Unknown':
                 run['solver_name'] = name_map.get(run['solver_id'], 'Unknown')
+            # Parse extra_stats_json back into the run dict
+            extra_json = run.pop('extra_stats_json', None)
+            if extra_json:
+                try:
+                    extra = json.loads(extra_json)
+                    run['extra_stats'] = extra
+                except (json.JSONDecodeError, TypeError):
+                    run['extra_stats'] = {}
+            else:
+                run['extra_stats'] = {}
         
         return runs
     

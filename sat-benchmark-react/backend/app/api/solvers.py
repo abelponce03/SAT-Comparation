@@ -1,8 +1,8 @@
 """
-Solvers API endpoints — backed by the dynamic plugin registry.
+Solvers API endpoints — backed by the dynamic YAML-based solver registry.
 
-All solver metadata, version detection, and comparison data are
-now generated automatically from the plugins in ``app/solvers/plugins/``.
+All solver metadata, installation, and comparison data are
+generated automatically from ``solver_definitions.yaml``.
 """
 
 from fastapi import APIRouter, Request, HTTPException
@@ -19,15 +19,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ==================== COMPATIBILITY LAYER ====================
-# These are kept so that other modules (experiments, dashboard,
-# sat_modeler) can import them without changes during the transition.
+# ==================== COMPATIBILITY LAYER ======================================
 
 def _build_compat_dict() -> Dict[str, Dict]:
-    """
-    Build a dict that looks like the old PRE_CONFIGURED_SOLVERS
-    so that dependents don't break.
-    """
+    """Build a dict that looks like the old PRE_CONFIGURED_SOLVERS."""
     solvers = solver_registry.list_solvers()
     return {
         info.key: {
@@ -46,9 +41,8 @@ def _build_compat_dict() -> Dict[str, Dict]:
     }
 
 
-# Backwards-compatible dict — lazily generated
 class _LazyDict:
-    """Behaves like the old PRE_CONFIGURED_SOLVERS dict."""
+    """Backwards-compatible dict facade."""
 
     def values(self):
         return _build_compat_dict().values()
@@ -100,61 +94,44 @@ def get_solver_by_id(solver_id: int) -> Optional[Dict]:
 
 # ==================== SCHEMAS ====================
 
-class SolverResponse(BaseModel):
-    id: int
-    key: str
-    name: str
-    version: str
-    description: str
-    executable_path: str
-    status: str
-    features: List[str]
-    website: str
-    category: str
-
-
-class SolverTestResult(BaseModel):
-    success: bool
-    solver_name: str
-    version_output: Optional[str] = None
-    error: Optional[str] = None
-    is_executable: bool
-    path_exists: bool
-
-
 class InstallRequest(BaseModel):
     solver_key: str
 
 
-class InstallResponse(BaseModel):
-    success: bool
-    message: str
-    version: Optional[str] = None
-    error: Optional[str] = None
+# ==================== HELPER ====================
+
+def _solver_info_to_dict(info, has_build_config: bool = True) -> Dict:
+    """Convert a SolverInfo to a JSON-serialisable dict."""
+    return {
+        "id": info.id,
+        "key": info.key,
+        "name": info.name,
+        "version": info.version,
+        "description": info.description,
+        "executable_path": info.executable_path,
+        "status": info.status,
+        "features": info.features,
+        "website": info.website,
+        "category": info.category,
+        "solver_type": info.solver_type,
+        "preprocessing": info.preprocessing,
+        "inprocessing": info.inprocessing,
+        "parallel": info.parallel,
+        "incremental": info.incremental,
+        "best_for": info.best_for,
+        "performance_class": info.performance_class,
+        "has_plugin": True,
+        "has_build_config": has_build_config,
+    }
 
 
 # ==================== ENDPOINTS ====================
 
 @router.get("/")
 async def list_solvers(request: Request, status: Optional[str] = None) -> List[Dict]:
-    """Get all registered solvers with live status."""
+    """Get all registered solvers (those with plugins) with live status."""
     all_solvers = solver_registry.list_solvers()
-
-    result = []
-    for info in all_solvers:
-        solver_dict = {
-            "id": info.id,
-            "key": info.key,
-            "name": info.name,
-            "version": info.version,
-            "description": info.description,
-            "executable_path": info.executable_path,
-            "status": info.status,
-            "features": info.features,
-            "website": info.website,
-            "category": info.category,
-        }
-        result.append(solver_dict)
+    result = [_solver_info_to_dict(info) for info in all_solvers]
 
     if status and status != "all":
         result = [s for s in result if s["status"] == status]
@@ -165,9 +142,63 @@ async def list_solvers(request: Request, status: Optional[str] = None) -> List[D
 @router.get("/count")
 async def get_solver_count() -> Dict:
     """Get count of available solvers."""
-    total = solver_registry.count
-    ready = solver_registry.ready_count
-    return {"total": total, "ready": ready, "unavailable": total - ready}
+    all_solvers = solver_registry.list_solvers()
+    ready = sum(1 for s in all_solvers if s.status == "ready")
+
+    catalog_count = 0
+    for info in all_solvers:
+        plugin = solver_registry.get_plugin(info.key)
+        if not getattr(plugin, "has_build_config", True):
+            catalog_count += 1
+
+    installable = len(all_solvers) - catalog_count
+    return {
+        "total": len(all_solvers),
+        "ready": ready,
+        "not_installed": installable - ready,
+        "catalog_only": catalog_count,
+        "total_known": len(all_solvers),
+    }
+
+
+@router.get("/library")
+async def get_solver_library() -> Dict:
+    """
+    Get the complete solver library: installed, available (has build config),
+    and catalog-only (informational, no build instructions).
+
+    This is the main endpoint for the Solvers module UI.
+    """
+    all_solvers = solver_registry.list_solvers()
+
+    installed = []
+    available = []
+    catalog = []
+
+    for info in all_solvers:
+        plugin = solver_registry.get_plugin(info.key)
+        has_build = getattr(plugin, "has_build_config", True)
+        d = _solver_info_to_dict(info, has_build_config=has_build)
+
+        if info.status == "ready":
+            installed.append(d)
+        elif has_build:
+            available.append(d)
+        else:
+            d["status"] = "catalog"
+            catalog.append(d)
+
+    return {
+        "installed": installed,
+        "available": available,
+        "catalog": catalog,
+        "stats": {
+            "installed_count": len(installed),
+            "available_count": len(available),
+            "catalog_count": len(catalog),
+            "total_known": len(installed) + len(available) + len(catalog),
+        },
+    }
 
 
 @router.get("/comparison-matrix")
@@ -179,21 +210,7 @@ async def get_comparison_matrix() -> Dict:
 @router.get("/ready")
 async def get_ready_solvers() -> List[Dict]:
     """Get only the solvers that are ready to use."""
-    return [
-        {
-            "id": info.id,
-            "key": info.key,
-            "name": info.name,
-            "version": info.version,
-            "description": info.description,
-            "executable_path": info.executable_path,
-            "status": info.status,
-            "features": info.features,
-            "website": info.website,
-            "category": info.category,
-        }
-        for info in solver_registry.get_ready_solvers()
-    ]
+    return [_solver_info_to_dict(info) for info in solver_registry.get_ready_solvers()]
 
 
 @router.get("/templates/list")
@@ -203,9 +220,9 @@ async def get_solver_templates() -> Dict:
     return {
         "supported_solvers": [s.key for s in all_solvers],
         "info": (
-            "Solvers are managed through the plugin system. "
-            "Use POST /solvers/install to install a new solver, "
-            "or add a plugin file in app/solvers/plugins/."
+            "Solvers are defined declaratively in solver_definitions.yaml. "
+            "To add a new solver, add an entry with name, repository, and "
+            "build steps — no Python code required."
         ),
         "solvers": {
             s.key: {"name": s.name, "version": s.version, "category": s.category}
@@ -220,18 +237,7 @@ async def get_solver(solver_id: int, request: Request) -> Dict:
     info = solver_registry.get_solver_info(solver_id)
     if not info:
         raise HTTPException(status_code=404, detail="Solver not found")
-    return {
-        "id": info.id,
-        "key": info.key,
-        "name": info.name,
-        "version": info.version,
-        "description": info.description,
-        "executable_path": info.executable_path,
-        "status": info.status,
-        "features": info.features,
-        "website": info.website,
-        "category": info.category,
-    }
+    return _solver_info_to_dict(info)
 
 
 @router.get("/by-name/{solver_name}")
@@ -240,18 +246,7 @@ async def get_solver_by_name(solver_name: str) -> Dict:
     info = solver_registry.get_solver_info_by_key(solver_name.lower())
     if not info:
         raise HTTPException(status_code=404, detail=f"Solver '{solver_name}' not found")
-    return {
-        "id": info.id,
-        "key": info.key,
-        "name": info.name,
-        "version": info.version,
-        "description": info.description,
-        "executable_path": info.executable_path,
-        "status": info.status,
-        "features": info.features,
-        "website": info.website,
-        "category": info.category,
-    }
+    return _solver_info_to_dict(info)
 
 
 @router.post("/{solver_id}/test")
@@ -297,7 +292,6 @@ async def test_solver(solver_id: int, request: Request) -> Dict:
         except Exception:
             continue
 
-    # Try running without any flags
     try:
         proc = subprocess.run([str(exe)], capture_output=True, text=True, timeout=5)
         output = proc.stdout or proc.stderr

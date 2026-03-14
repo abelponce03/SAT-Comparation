@@ -1,0 +1,801 @@
+# =============================================================================
+# SAT Solver Definitions — Single Source of Truth
+# =============================================================================
+#
+# Para agregar un nuevo solver:
+#   1. Agrega una entrada bajo 'solvers:' con un key único (lowercase)
+#   2. Llena los campos de metadata (name, version, description, etc.)
+#   3. Agrega una sección 'build:' si quieres que se pueda instalar desde la UI
+#   4. Reinicia el backend — el solver aparecerá automáticamente
+#
+# Si el solver ya está instalado en el sistema (en el PATH), se detecta
+# automáticamente sin necesidad de compilar ni configurar nada.
+#
+# Campos requeridos: name, version, description, website, category, features
+# Campos opcionales: solver_type, preprocessing, inprocessing, parallel,
+#                    incremental, best_for, performance_class, build
+#
+# Campos de ejecución:
+#   system_binary_names  — nombres de ejecutable a buscar en PATH del sistema
+#   run_flags            — flags que se agregan al ejecutar (para máximas métricas)
+#   version_flags        — flags para detectar versión
+#   version_pattern      — regex para parsear la versión del output
+#   extra_stats          — regex patterns para extraer métricas adicionales
+#
+# =============================================================================
+
+solvers:
+
+  # ─────────────────────────────────────────────────────
+  # Kissat — State-of-the-art competition solver
+  # ─────────────────────────────────────────────────────
+  kissat:
+    name: Kissat
+    version: "4.0.4"
+    description: >-
+      Kissat SAT Solver — Powerful CDCL solver that won multiple SAT competitions
+      (2020, 2021, 2022). Known for excellent performance on industrial and
+      crafted instances. Developed by Armin Biere.
+    website: "https://github.com/arminbiere/kissat"
+    category: competition
+    features:
+      - CDCL
+      - Preprocessing
+      - Inprocessing
+      - Learned clause minimization
+      - Vivification
+      - Lucky phases
+      - Bounded variable elimination
+      - Chronological backtracking
+      - Stable/focused mode switching
+    solver_type: CDCL
+    preprocessing: true
+    inprocessing: true
+    best_for: [Industrial, Crafted, Competition]
+    performance_class: State-of-the-art
+
+    system_binary_names: [kissat]
+
+    run_flags: ["--statistics"]
+
+    build:
+      repository: "https://github.com/arminbiere/kissat.git"
+      deps: [git, make, gcc]
+      steps:
+        - "./configure"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "build/kissat"
+
+    version_flags: ["--version"]
+    extra_stats:
+      # Search statistics
+      chronological: 'chronological:\s+(\d+)'
+      searched: 'searched:\s+(\d+)'
+      switched: 'switched:\s+(\d+)'
+      stable: 'stable:\s+(\d+)'
+      focused: 'focused:\s+(\d+)'
+      flipped: 'flipped:\s+(\d+)'
+      bumped: 'bumped:\s+(\d+)'
+      ticks: 'ticks:\s+(\d+)'
+      iterations: 'iterations:\s+(\d+)'
+      walks: 'walks:\s+(\d+)'
+      # Clause management
+      vivified: 'vivified:\s+(\d+)'
+      substituted: 'substituted:\s+(\d+)'
+      strengthened: 'strengthened:\s+(\d+)'
+      subsumed: 'subsumed:\s+(\d+)'
+      compacted: 'compacted:\s+(\d+)'
+      collected: 'collected:\s+(\d+)'
+      flushed: 'flushed:\s+(\d+)'
+      weakened: 'weakened:\s+(\d+)'
+      ternary: 'ternary:\s+(\d+)'
+      # Preprocessing / inprocessing
+      eliminated: 'eliminated:\s+(\d+)'
+      congruent: 'congruent:\s+(\d+)'
+      factored: 'factored:\s+(\d+)'
+      failed: 'failed:\s+(\d+)'
+      probing: 'probing:\s+(\d+)'
+      reductions: 'reductions:\s+(\d+)'
+      rephased: 'rephased:\s+(\d+)'
+      # Clause breakdown
+      clauses_original: 'clauses[_-]original:\s+(\d+)'
+      clauses_learned: '(?:clauses[_-]learn|clauses[_-]learnt)(?:ed)?:\s+(\d+)'
+      # Resource (solver-reported)
+      process_time: 'process[_-]time:\s+([\d.]+)'
+      maximum_resident_set_size_bytes: 'maximum[_-]resident[_-]set[_-]size:\s+(\d+)'
+
+  # ─────────────────────────────────────────────────────
+  # MiniSat — The reference CDCL implementation
+  # ─────────────────────────────────────────────────────
+  minisat:
+    name: MiniSat
+    version: "2.2.0"
+    description: >-
+      MiniSat — Minimalistic, open-source SAT solver. The reference
+      implementation for the CDCL algorithm with two-watched literals.
+      Widely used in academia and as a base for many derived solvers.
+    website: "http://minisat.se/"
+    category: educational
+    features:
+      - CDCL
+      - Conflict clause learning
+      - Variable activity (VSIDS)
+      - Two-watched literals
+      - Phase saving
+      - Clause simplification
+    preprocessing: true
+    incremental: true
+    best_for: [Educational, Research, Small instances]
+    performance_class: Reference implementation
+
+    system_binary_names: [minisat]
+
+    run_flags: ["-verb=1"]
+
+    build:
+      repository: "https://github.com/niklasso/minisat.git"
+      deps: [git, make, g++]
+      steps:
+        - "make -C core rs"
+      fallback_steps:
+        - "make -C core"
+        - "make -C simp rs"
+        - "make -C simp"
+      executable_candidates:
+        - "core/minisat"
+        - "simp/minisat"
+        - "core/minisat_release"
+        - "simp/minisat_release"
+
+    version_flags: ["--help"]
+    version_pattern: 'MiniSat\s+([\d.]+)'
+    extra_stats:
+      # Core statistics
+      conflict_literals: 'conflict\s*literals\s*[:\s]+(\d+)'
+      num_variables: 'Number of variables\s*[:\s]+(\d+)'
+      num_clauses: 'Number of clauses\s*[:\s]+(\d+)'
+      # Timing
+      parse_time: 'Parse time\s*[:\s]+([\d.]+)\s*s'
+      simplification_time: 'Simplification time\s*[:\s]+([\d.]+)\s*s'
+      # Memory
+      memory_used_mb: 'Memory used\s*[:\s]+([\d.]+)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # CaDiCaL — Advanced CDCL with inprocessing
+  # ─────────────────────────────────────────────────────
+  cadical:
+    name: CaDiCaL
+    version: "2.1.3"
+    description: >-
+      CaDiCaL — Conflict-Driven Clause Learning SAT Solver by Armin Biere.
+      Advanced CDCL with chronological backtracking, extensive inprocessing,
+      and EMA-based restarts. Multiple SAT Competition wins. Backbone of
+      the CaDiCaL-based portfolio approach.
+    website: "https://github.com/arminbiere/cadical"
+    category: competition
+    features:
+      - CDCL
+      - Chronological backtracking
+      - Inprocessing
+      - Vivification
+      - Lucky phases
+      - Bounded variable elimination
+      - Probing
+      - EMA restarts
+      - Blocked clause elimination
+    preprocessing: true
+    inprocessing: true
+    incremental: true
+    best_for: [Industrial, Verification, Competition]
+    performance_class: State-of-the-art
+
+    system_binary_names: [cadical]
+
+    run_flags: ["--statistics"]
+
+    build:
+      repository: "https://github.com/arminbiere/cadical.git"
+      deps: [git, make, g++]
+      steps:
+        - "./configure"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "build/cadical"
+
+    extra_stats:
+      # Search
+      chronological: 'chronological:\s+(\d+)'
+      stabilized: 'stabilized:\s+(\d+)'
+      # Clause management
+      vivified: 'vivified:\s+(\d+)'
+      subsumed: 'subsumed:\s+(\d+)'
+      strengthened: 'strengthened:\s+(\d+)'
+      deduplicated: 'deduplicated:\s+(\d+)'
+      compacted: 'compacted:\s+(\d+)'
+      collected: 'collected:\s+(\d+)'
+      flushed: 'flushed:\s+(\d+)'
+      ternary: 'ternary:\s+(\d+)'
+      # Preprocessing
+      eliminated: 'eliminated:\s+(\d+)'
+      reductions: 'reductions:\s+(\d+)'
+      probing: 'probing:\s+(\d+)'
+      # Resource
+      process_time: 'process[_-]time:\s+([\d.]+)'
+      maximum_resident_set_size_bytes: 'maximum[_-]resident[_-]set[_-]size:\s+(\d+)'
+
+  # ─────────────────────────────────────────────────────
+  # CryptoMiniSat — Advanced solver with XOR reasoning
+  # ─────────────────────────────────────────────────────
+  cryptominisat:
+    name: CryptoMiniSat
+    version: "5.11.21"
+    description: >-
+      CryptoMiniSat — Advanced SAT solver with native XOR reasoning by
+      Mate Soos. Excels on cryptographic and structured instances using
+      Gaussian elimination. Supports parallel solving and SQL logging
+      for detailed performance analysis.
+    website: "https://github.com/msoos/cryptominisat"
+    category: competition
+    features:
+      - CDCL
+      - XOR reasoning
+      - Gaussian elimination
+      - Component caching
+      - SQL logging
+      - Bounded variable elimination
+      - Probing
+      - Stamping
+    solver_type: "CDCL + XOR"
+    preprocessing: true
+    inprocessing: true
+    parallel: true
+    incremental: true
+    best_for: [Cryptographic, XOR-heavy, Structured]
+    performance_class: Specialized
+
+    system_binary_names: [cryptominisat5, cryptominisat]
+
+    run_flags: ["--verb", "1"]
+
+    build:
+      repository: "https://github.com/msoos/cryptominisat.git"
+      deps: [git, cmake, make, g++]
+      checkout_tag: "5.11.21"
+      post_clone:
+        - "git submodule update --init"
+      steps:
+        - "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .."
+        - "cd build && make -j$(nproc)"
+      fallback_steps:
+        - "rm -rf build && mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DNOM4RI=ON -DSTATS=OFF -DENABLE_TESTING=OFF .."
+        - "cd build && make -j$(nproc)"
+      executable_candidates:
+        - "build/cryptominisat5"
+        - "build/cryptominisat5_simple"
+
+    extra_stats:
+      # XOR-specific (CryptoMiniSat specialty)
+      xor_clauses: 'xor\s*clauses?\s*[:\s]+(\d+)'
+      gauss_called: 'gauss.*called\s*[:\s]+(\d+)'
+      gauss_useful: 'gauss.*useful\s*[:\s]+(\d+)'
+      gauss_propagations: 'gauss.*propag\w*\s*[:\s]+(\d+)'
+      gauss_conflicts: 'gauss.*conflict\w*\s*[:\s]+(\d+)'
+      # Clause breakdown
+      binary_clauses: 'binary\s*clauses?\s*[:\s]+(\d+)'
+      ternary_clauses: '(?:tri|ternary)\s*clauses?\s*[:\s]+(\d+)'
+      long_clauses: 'long\s*clauses?\s*[:\s]+(\d+)'
+      irredundant: 'irredundant\s*[:\s]+(\d+)'
+      redundant: 'redundant\s*[:\s]+(\d+)'
+      # Preprocessing
+      eliminated_vars: '(?:elim|eliminated)\s*(?:vars?)?\s*[:\s]+(\d+)'
+      blocked_clauses: 'blocked\s*(?:clauses?)?\s*[:\s]+(\d+)'
+      # Cache
+      component_cache_hits: 'cache\s*hits?\s*[:\s]+(\d+)'
+      # Memory
+      memory_used_mb: 'Mem\s*used\s*[:\s]+([\d.]+)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # Glucose — Enhanced MiniSat with LBD
+  # ─────────────────────────────────────────────────────
+  glucose:
+    name: Glucose
+    version: "4.2.1"
+    description: >-
+      Glucose — Enhanced version of MiniSat introducing Literal Block Distance
+      (LBD) for learned clause quality estimation and aggressive clause deletion.
+      Known for excellent SAT competition results and robust performance on
+      industrial instances. Pioneered the concept of "glue clauses".
+    website: "https://github.com/audemard/glucose"
+    category: competition
+    features:
+      - CDCL
+      - LBD-based clause management
+      - Aggressive clause deletion
+      - Adaptive restarts
+      - Phase saving
+      - Variable activity (VSIDS)
+      - Glue clauses
+    preprocessing: true
+    inprocessing: true
+    best_for: [Industrial, Competition, General purpose]
+    performance_class: High performance
+
+    system_binary_names: [glucose, glucose-syrup]
+
+    run_flags: ["-verb=1"]
+
+    build:
+      repository: "https://github.com/audemard/glucose.git"
+      deps: [git, cmake, make, g++]
+      steps:
+        - "mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .."
+        - "cd build && make -j$(nproc)"
+      fallback_steps:
+        - "make -C simp rs 2>/dev/null || make -C simp 2>/dev/null || make rs 2>/dev/null || true"
+      executable_candidates:
+        - "build/glucose"
+        - "build/glucose-syrup"
+        - "simp/glucose"
+        - "simp/glucose_release"
+
+    version_flags: ["--help"]
+    version_pattern: '[Gg]lucose\s+([\d.]+)'
+    extra_stats:
+      # LBD-specific (Glucose specialty)
+      lbd_avg: 'LBD\s*avg\s*[:\s]+([\d.]+)'
+      nb_reduced_clauses: 'nb\s*reduced\s*[:\s]+(\d+)'
+      glucose_reductions: 'glucose\s*reduct\w*\s*[:\s]+(\d+)'
+      # Core
+      conflict_literals: 'conflict\s*literals\s*[:\s]+(\d+)'
+      num_variables: 'Number of variables\s*[:\s]+(\d+)'
+      num_clauses: 'Number of clauses\s*[:\s]+(\d+)'
+      # Memory
+      memory_used_mb: 'Memory used\s*[:\s]+([\d.]+)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # Lingeling — High-performance with extensive preprocessing
+  # ─────────────────────────────────────────────────────
+  lingeling:
+    name: Lingeling
+    version: "bcj"
+    description: >-
+      Lingeling — High-performance SAT solver by Armin Biere. Features
+      extensive preprocessing, inprocessing, and clause elimination techniques.
+      Predecessor to CaDiCaL with a proven track record in SAT competitions.
+      Produces very detailed statistics.
+    website: "https://github.com/arminbiere/lingeling"
+    category: competition
+    features:
+      - CDCL
+      - Preprocessing
+      - Inprocessing
+      - Bounded variable elimination
+      - Blocked clause elimination
+      - Probing
+      - Vivification
+      - Autarky reasoning
+      - Decomposition
+    preprocessing: true
+    inprocessing: true
+    best_for: [Industrial, Structured, Preprocessing-heavy]
+    performance_class: High performance
+
+    system_binary_names: [lingeling]
+
+    run_flags: ["-v"]
+
+    build:
+      repository: "https://github.com/arminbiere/lingeling.git"
+      deps: [git, make, gcc]
+      steps:
+        - "if [ -f configure.sh ]; then ./configure.sh; else ./configure; fi"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "lingeling"
+
+    version_flags: ["--version"]
+    extra_stats:
+      irredundant: 'irredundant\s*[:\s]+(\d+)'
+      redundant: 'redundant\s*[:\s]+(\d+)'
+      units: 'units\s*[:\s]+(\d+)'
+      equivalent: 'equivalent\s*[:\s]+(\d+)'
+      eliminated: 'eliminated\s*[:\s]+(\d+)'
+      blocked: 'blocked\s*[:\s]+(\d+)'
+      probing: 'probing\s*[:\s]+(\d+)'
+      reductions: 'reductions\s*[:\s]+(\d+)'
+      decompositions: 'decompositions?\s*[:\s]+(\d+)'
+      autarky: 'autark\w*\s*[:\s]+(\d+)'
+      # Memory
+      memory_mb: '(\d+\.?\d*)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # MapleSAT — SAT Competition 2016 winner
+  # ─────────────────────────────────────────────────────
+  maplesat:
+    name: MapleSAT
+    version: "2.0"
+    description: >-
+      MapleSAT — SAT Competition winning solver based on MiniSat, featuring
+      Machine Learning-inspired branching heuristics (LRB — Learning Rate
+      Branching) and the VSIDS/CHB hybrid. Winner of SAT Competition 2016
+      main track. Combines simplicity with advanced heuristics.
+    website: "https://github.com/CanadaCommits/MapleSAT"
+    category: competition
+    features:
+      - CDCL
+      - LRB branching heuristic
+      - CHB heuristic
+      - VSIDS
+      - Phase saving
+      - Clause minimization
+    preprocessing: true
+    best_for: [Industrial, Competition, Random]
+    performance_class: Competition winner
+
+    system_binary_names: [maplesat, maplecomsps, MapleCOMSPS]
+
+    run_flags: ["-verb=1"]
+
+    build:
+      repository:
+        - "https://github.com/CanadaCommits/MapleSAT.git"
+        - "https://github.com/RickButer/MapleSAT.git"
+      deps: [git, make, g++]
+      steps:
+        - "make -C simp rs 2>/dev/null || make -C simp 2>/dev/null || true"
+      fallback_steps:
+        - "make -C core rs 2>/dev/null || make -C core 2>/dev/null || true"
+        - "make -j$(nproc) 2>&1 || true"
+      executable_candidates:
+        - "core/maplesat"
+        - "simp/maplesat"
+        - "core/maplecomsps"
+        - "simp/maplecomsps"
+        - "core/MapleCOMSPS"
+        - "simp/MapleCOMSPS"
+        - "core/maplesat_release"
+        - "simp/maplesat_release"
+
+    version_flags: ["--help"]
+    version_pattern: '[Mm]aple\w*\s+([\d.]+)'
+    extra_stats:
+      conflict_literals: 'conflict\s*literals\s*[:\s]+(\d+)'
+      num_variables: 'Number of variables\s*[:\s]+(\d+)'
+      num_clauses: 'Number of clauses\s*[:\s]+(\d+)'
+      memory_used_mb: 'Memory used\s*[:\s]+([\d.]+)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # Gimsatul — Parallel SAT solver by Armin Biere
+  # ─────────────────────────────────────────────────────
+  gimsatul:
+    name: Gimsatul
+    version: "2.1.1"
+    description: >-
+      Gimsatul — Parallel SAT solver by Armin Biere. Uses a shared clause
+      database with lock-free data structures for efficient multi-threaded
+      solving. Participated in SAT Competition parallel track. State-of-the-art
+      parallel architecture.
+    website: "https://github.com/arminbiere/gimsatul"
+    category: competition
+    features:
+      - CDCL
+      - Parallel solving
+      - Shared clause database
+      - Lock-free data structures
+      - Multi-threaded
+      - Clause sharing
+    inprocessing: true
+    parallel: true
+    best_for: [Parallel solving, Large instances, Multi-core]
+    performance_class: Parallel specialist
+
+    system_binary_names: [gimsatul]
+
+    run_flags: ["--statistics"]
+
+    build:
+      repository: "https://github.com/arminbiere/gimsatul.git"
+      deps: [git, make, gcc]
+      steps:
+        - "./configure"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "build/gimsatul"
+        - "gimsatul"
+
+    extra_stats:
+      # Parallel-specific (Gimsatul specialty)
+      threads: 'threads\s*[:\s]+(\d+)'
+      shared_clauses: 'shared\s*[:\s]+(\d+)'
+      imported: 'imported\s*[:\s]+(\d+)'
+      exported: 'exported\s*[:\s]+(\d+)'
+      # Resource
+      process_time: 'process[_-]time:\s+([\d.]+)'
+      maximum_resident_set_size_bytes: 'maximum[_-]resident[_-]set[_-]size:\s+(\d+)'
+
+  # ─────────────────────────────────────────────────────
+  # MergeSAT — Merged MiniSat + CaDiCaL techniques
+  # ─────────────────────────────────────────────────────
+  mergesat:
+    name: MergeSAT
+    version: "4.0"
+    description: >-
+      MergeSAT — SAT solver that merges techniques from MiniSat and CaDiCaL.
+      Combines MiniSat's simplicity with advanced clause management and
+      inprocessing strategies from modern solvers. Participated in recent
+      SAT competitions with competitive results.
+    website: "https://github.com/conp-solutions/mergesat"
+    category: competition
+    features:
+      - CDCL
+      - Merged heuristics
+      - Clause management
+      - Variable activity
+      - Phase saving
+      - Vivification extensions
+    preprocessing: true
+    best_for: [Industrial, General purpose]
+    performance_class: Competitive
+
+    system_binary_names: [mergesat]
+
+    run_flags: ["-verb=1"]
+
+    build:
+      repository: "https://github.com/conp-solutions/mergesat.git"
+      deps: [git, make, g++]
+      steps:
+        - "make -C core rs 2>/dev/null || make -C core 2>/dev/null || true"
+      fallback_steps:
+        - "make -C simp rs 2>/dev/null || make -C simp 2>/dev/null || true"
+        - "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release 2>/dev/null && make -j$(nproc) 2>/dev/null || true"
+      executable_candidates:
+        - "core/mergesat"
+        - "simp/mergesat"
+        - "core/mergesat_release"
+        - "simp/mergesat_release"
+        - "build/mergesat"
+        - "mergesat"
+
+    version_flags: ["--help"]
+    version_pattern: '[Mm]erge\w*\s+([\d.]+)'
+    extra_stats:
+      conflict_literals: 'conflict\s*literals\s*[:\s]+(\d+)'
+      num_variables: 'Number of variables\s*[:\s]+(\d+)'
+      num_clauses: 'Number of clauses\s*[:\s]+(\d+)'
+      memory_used_mb: 'Memory used\s*[:\s]+([\d.]+)\s*MB'
+
+  # ─────────────────────────────────────────────────────
+  # PicoSAT — Compact CDCL solver
+  # ─────────────────────────────────────────────────────
+  picosat:
+    name: PicoSAT
+    version: "965"
+    description: >-
+      PicoSAT — Compact and well-tested SAT solver by Armin Biere. Known for
+      its small code footprint, solid performance, and proof generation
+      capabilities. Often used as a backend in verification tools.
+    website: "https://github.com/dreal-deps/picosat"
+    category: educational
+    features: [CDCL, Compact, Proof generation, Trace support]
+    best_for: [Educational, Embedded, Verification]
+    performance_class: Compact
+
+    system_binary_names: [picosat]
+
+    run_flags: ["-v"]
+
+    build:
+      repository: "https://github.com/dreal-deps/picosat.git"
+      deps: [git, make, gcc]
+      steps:
+        - "./configure.sh"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "picosat"
+
+    extra_stats:
+      learned_literals: 'learned\s*literals?\s*[:\s]+(\d+)'
+      original_clauses_count: 'clauses\s*[:\s]+(\d+)'
+      seconds: '(\d+\.?\d*)\s*seconds'
+      megabytes: '(\d+\.?\d*)\s*(?:MB|megabytes)'
+
+  # ─────────────────────────────────────────────────────
+  # march — Look-ahead SAT solver
+  # ─────────────────────────────────────────────────────
+  march:
+    name: march_SAT
+    version: "2022"
+    description: >-
+      march — Look-ahead SAT solver specialized in random and crafted
+      instances by Marijn Heule. Uses cube-and-conquer for hard combinatorial
+      problems. Fundamentally different approach from CDCL — uses look-ahead
+      for branching, which excels on structured problems.
+    website: "https://github.com/marijnheule/march-SAT"
+    category: specialized
+    features: [Look-ahead, Cube-and-conquer, Random instances, Autarky]
+    solver_type: Look-ahead
+    best_for: [Random instances, Crafted, Combinatorial]
+    performance_class: Specialized (look-ahead)
+
+    system_binary_names: [march_cu, march_dl, march]
+
+    # march produces verbose output by default
+    run_flags: []
+
+    build:
+      repository: "https://github.com/marijnheule/march-SAT.git"
+      deps: [git, make, gcc]
+      steps:
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "march_cu"
+        - "march_dl"
+        - "march"
+
+    extra_stats:
+      cubes: 'cubes\s*[:\s]+(\d+)'
+      look_ahead_count: 'look[_-]ahead\w*\s*[:\s]+(\d+)'
+      binary_clauses: 'binary\s*[:\s]+(\d+)'
+      reductions_march: 'reduc\w*\s*[:\s]+(\d+)'
+
+  # ─────────────────────────────────────────────────────
+  # Satch — Educational CDCL solver
+  # ─────────────────────────────────────────────────────
+  satch:
+    name: Satch
+    version: "0.1"
+    description: >-
+      Satch — Educational CDCL SAT solver by Armin Biere. Clean,
+      well-documented implementation ideal for learning SAT solving
+      internals. Implements core CDCL with clear code structure.
+    website: "https://github.com/arminbiere/satch"
+    category: educational
+    features: [CDCL, Educational, Clean codebase, Well-documented]
+    best_for: [Educational, Learning]
+    performance_class: Educational
+
+    system_binary_names: [satch]
+
+    run_flags: ["--statistics"]
+
+    build:
+      repository: "https://github.com/arminbiere/satch.git"
+      deps: [git, make, gcc]
+      steps:
+        - "./configure"
+        - "make -j$(nproc)"
+      executable_candidates:
+        - "satch"
+        - "build/satch"
+
+    extra_stats:
+      process_time: 'process[_-]time:\s+([\d.]+)'
+      maximum_resident_set_size_bytes: 'maximum[_-]resident[_-]set[_-]size:\s+(\d+)'
+
+  # ─────────────────────────────────────────────────────
+  # Riss — Feature-rich solver with Coprocessor
+  # ─────────────────────────────────────────────────────
+  riss:
+    name: Riss
+    version: "7.1"
+    description: >-
+      Riss — Feature-rich SAT solver with extensive preprocessing via
+      Coprocessor by Norbert Manthey. Supports BVE, probing, vivification,
+      and many advanced preprocessing techniques. Participated in many SAT
+      competitions.
+    website: "https://github.com/nmanthey/riss-solver"
+    category: competition
+    features: [CDCL, Coprocessor, BVE, Probing, Vivification, Subsumption]
+    preprocessing: true
+    inprocessing: true
+    best_for: [Industrial, Competition]
+    performance_class: High performance
+
+    system_binary_names: [riss]
+
+    run_flags: ["-verb=1"]
+
+    build:
+      repository: "https://github.com/nmanthey/riss-solver.git"
+      deps: [git, cmake, make, g++]
+      steps:
+        - "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release"
+        - "cd build && make -j$(nproc)"
+      executable_candidates:
+        - "build/bin/riss"
+        - "build/riss"
+        - "riss"
+
+    extra_stats:
+      conflict_literals: 'conflict\s*literals\s*[:\s]+(\d+)'
+      num_variables: 'Number of variables\s*[:\s]+(\d+)'
+      num_clauses: 'Number of clauses\s*[:\s]+(\d+)'
+      eliminated_coprocessor: '(?:coprocessor|cp)\s*(?:elim|eliminat)\w*\s*[:\s]+(\d+)'
+      memory_used_mb: 'Memory used\s*[:\s]+([\d.]+)\s*MB'
+
+  # =============================================================================
+  # CATALOG-ONLY SOLVERS (informational, sin instrucciones de build automático)
+  # Si se instalan manualmente en el sistema, se detectan automáticamente
+  # por system_binary_names.
+  # =============================================================================
+
+  precosat:
+    name: PrecoSAT
+    version: "576"
+    description: >-
+      PrecoSAT — Preprocessing-heavy SAT solver by Armin Biere. Winner of
+      SAT Race 2010. No public repository available for automatic installation.
+    website: "http://fmv.jku.at/precosat/"
+    category: competition
+    features: [CDCL, Heavy preprocessing, Variable elimination]
+    preprocessing: true
+    best_for: [Competition]
+    performance_class: Historical
+
+    system_binary_names: [precosat]
+    run_flags: ["-v"]
+
+  plingeling:
+    name: Plingeling
+    version: "bcj"
+    description: >-
+      Plingeling — Parallel version of Lingeling by Armin Biere. Portfolio
+      approach with cube-and-conquer. Built from the Lingeling repository.
+    website: "https://github.com/arminbiere/lingeling"
+    category: competition
+    features: [CDCL, Parallel, Cube-and-conquer, Portfolio]
+    parallel: true
+    best_for: [Parallel solving, Large instances]
+    performance_class: High performance
+
+    system_binary_names: [plingeling]
+    run_flags: ["-v"]
+
+  varisat:
+    name: Varisat
+    version: "0.2.2"
+    description: >-
+      Varisat — SAT solver written in Rust with proof generation support.
+      Modern, memory-safe implementation. Requires Rust toolchain to build.
+    website: "https://github.com/jix/varisat"
+    category: specialized
+    features: [CDCL, Rust, Proof generation, Memory-safe]
+    best_for: [Research, Proof-logging]
+    performance_class: Specialized
+
+    system_binary_names: [varisat]
+
+  clasp:
+    name: clasp
+    version: "3.3.10"
+    description: >-
+      clasp — Answer Set Programming (ASP) solver that also works as a SAT
+      solver. Part of the Potassco suite. Hybrid approach combining CDCL
+      with constraint propagation.
+    website: "https://github.com/potassco/clasp"
+    category: specialized
+    features: [CDCL, ASP, Parallel, Incremental, Optimization]
+    parallel: true
+    incremental: true
+    best_for: [ASP, Optimization]
+    performance_class: Specialized
+
+    system_binary_names: [clasp]
+    run_flags: ["--stats"]
+
+  painless:
+    name: Painless
+    version: "2.0"
+    description: >-
+      Painless — Parallel SAT Solving framework. Supports multiple backend
+      solvers and various clause sharing strategies. Complex build process.
+    website: "https://github.com/vvallade/painless"
+    category: specialized
+    features: [Parallel, Framework, Portfolio, Clause sharing]
+    parallel: true
+    best_for: [Parallel solving, Research]
+    performance_class: Framework
+
+    system_binary_names: [painless]

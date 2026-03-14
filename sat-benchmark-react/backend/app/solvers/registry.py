@@ -1,9 +1,13 @@
 """
-Solver Registry — central catalogue of all solver plugins.
+Solver Registry — central catalogue of all SAT solvers.
 
-Auto-discovers plugins from the ``plugins/`` sub-package and assigns
-stable numeric IDs.  Existing solver IDs are preserved for backwards
-compatibility with database records; new solvers get the next available ID.
+Loads solver definitions from ``solver_definitions.yaml`` (the single source
+of truth) and creates GenericSolverPlugin instances automatically.  Custom
+``.py`` plugins in the ``plugins/`` directory can optionally override YAML
+definitions for truly custom behaviour.
+
+Stable numeric IDs are preserved for backwards compatibility with existing
+database records.
 """
 
 from __future__ import annotations
@@ -15,7 +19,10 @@ import pkgutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import yaml
+
 from .base import SolverPlugin, SolverInfo, SolverInstallResult, SolverStatus
+from .generic_plugin import GenericSolverPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -48,28 +55,75 @@ class SolverRegistry:
     # ── discovery ───────────────────────────────────────
 
     def discover_plugins(self) -> None:
-        """Scan the ``plugins`` package and register all SolverPlugin subclasses."""
+        """Load solver definitions from YAML and apply optional .py overrides."""
         if self._loaded:
             return
 
-        plugins_package = "app.solvers.plugins"
-        plugins_path = Path(__file__).parent / "plugins"
+        # 1) Primary source: YAML definitions (no per-solver .py code needed)
+        self._load_yaml_definitions()
 
-        if not plugins_path.is_dir():
-            logger.warning("Plugins directory not found: %s", plugins_path)
-            self._loaded = True
+        # 2) Optional: custom .py plugins can override YAML-defined solvers
+        self._discover_py_plugins()
+
+        self._rebuild_id_map()
+        self._loaded = True
+        logger.info(
+            "Solver registry loaded %d solvers: %s",
+            len(self._plugins),
+            ", ".join(sorted(self._plugins.keys())),
+        )
+
+    # ── YAML-based loader ───────────────────────────────
+
+    def _load_yaml_definitions(self) -> None:
+        """Create GenericSolverPlugin instances from solver_definitions.yaml."""
+        yaml_path = Path(__file__).parent / "solver_definitions.yaml"
+        if not yaml_path.is_file():
+            logger.warning("solver_definitions.yaml not found at %s", yaml_path)
             return
 
-        for finder, module_name, is_pkg in pkgutil.iter_modules([str(plugins_path)]):
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
+        except Exception as exc:
+            logger.error("Failed to parse solver_definitions.yaml: %s", exc)
+            return
+
+        solvers = data.get("solvers", {}) if data else {}
+        for key, config in solvers.items():
+            try:
+                plugin = GenericSolverPlugin(key, config)
+                self.register(plugin)
+            except Exception as exc:
+                logger.error("Failed to create solver '%s' from YAML: %s", key, exc)
+
+        logger.info("Loaded %d solver definitions from YAML", len(solvers))
+
+    # ── .py plugin override discovery (optional) ────────
+
+    def _discover_py_plugins(self) -> None:
+        """Scan ``plugins/`` for custom .py plugins that override YAML.
+
+        This is entirely optional.  A .py plugin is useful **only** when a
+        solver needs truly custom logic that cannot be expressed as YAML
+        build steps (e.g. dynamic library linking, custom output parsing).
+        """
+        plugins_path = Path(__file__).parent / "plugins"
+        if not plugins_path.is_dir():
+            return
+
+        plugins_package = "app.solvers.plugins"
+        for _finder, module_name, _is_pkg in pkgutil.iter_modules([str(plugins_path)]):
             if module_name.startswith("_"):
                 continue
             fqn = f"{plugins_package}.{module_name}"
             try:
                 mod = importlib.import_module(fqn)
-                # Look for a module-level ``plugin`` attribute or
-                # any class that subclasses SolverPlugin.
                 if hasattr(mod, "plugin") and isinstance(mod.plugin, SolverPlugin):
-                    self.register(mod.plugin)
+                    key = mod.plugin.key
+                    if key in self._plugins:
+                        logger.info("Custom .py plugin overrides YAML for '%s'", key)
+                    self._plugins[key] = mod.plugin
                 else:
                     for attr_name in dir(mod):
                         obj = getattr(mod, attr_name)
@@ -77,23 +131,22 @@ class SolverRegistry:
                             isinstance(obj, type)
                             and issubclass(obj, SolverPlugin)
                             and obj is not SolverPlugin
+                            and obj is not GenericSolverPlugin
                         ):
-                            # Instantiate and register
                             try:
                                 instance = obj()
-                                self.register(instance)
+                                key = instance.key
+                                if key in self._plugins:
+                                    logger.info(
+                                        "Custom .py plugin overrides YAML for '%s'", key
+                                    )
+                                self._plugins[key] = instance
                             except Exception as exc:
-                                logger.error("Failed to instantiate %s: %s", attr_name, exc)
+                                logger.error(
+                                    "Failed to instantiate %s: %s", attr_name, exc
+                                )
             except Exception as exc:
-                logger.error("Failed to load solver plugin module '%s': %s", fqn, exc)
-
-        self._rebuild_id_map()
-        self._loaded = True
-        logger.info(
-            "Solver registry loaded %d plugins: %s",
-            len(self._plugins),
-            ", ".join(sorted(self._plugins.keys())),
-        )
+                logger.error("Failed to load plugin module '%s': %s", fqn, exc)
 
     def register(self, plugin: SolverPlugin) -> None:
         """Register a single plugin instance (idempotent by key)."""

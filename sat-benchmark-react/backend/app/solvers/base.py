@@ -15,7 +15,9 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -77,6 +79,8 @@ class SolverRunResult:
     exit_code: int = -1
     wall_time_seconds: float = 0.0
     cpu_time_seconds: float = 0.0
+    user_time_seconds: float = 0.0
+    system_time_seconds: float = 0.0
     max_memory_kb: int = 0
     solver_output: str = ""
     error_message: str = ""
@@ -85,6 +89,16 @@ class SolverRunResult:
     decisions: Optional[int] = None
     propagations: Optional[int] = None
     restarts: Optional[int] = None
+    learnt_clauses: Optional[int] = None
+    deleted_clauses: Optional[int] = None
+    # Resource metrics from /usr/bin/time -v
+    page_faults_minor: Optional[int] = None
+    page_faults_major: Optional[int] = None
+    context_switches_voluntary: Optional[int] = None
+    context_switches_involuntary: Optional[int] = None
+    filesystem_inputs: Optional[int] = None
+    filesystem_outputs: Optional[int] = None
+    # All additional solver-specific metrics
     extra_stats: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -93,6 +107,8 @@ class SolverRunResult:
             "exit_code": self.exit_code,
             "wall_time_seconds": self.wall_time_seconds,
             "cpu_time_seconds": self.cpu_time_seconds,
+            "user_time_seconds": self.user_time_seconds,
+            "system_time_seconds": self.system_time_seconds,
             "max_memory_kb": self.max_memory_kb,
             "solver_output": self.solver_output,
             "error_message": self.error_message,
@@ -100,8 +116,22 @@ class SolverRunResult:
             "decisions": self.decisions,
             "propagations": self.propagations,
             "restarts": self.restarts,
+            "learnt_clauses": self.learnt_clauses,
+            "deleted_clauses": self.deleted_clauses,
         }
-        # Merge extra stats (learnt_clauses, deleted_clauses, etc.)
+        # Merge resource & extra stats
+        if self.page_faults_minor is not None:
+            d["page_faults_minor"] = self.page_faults_minor
+        if self.page_faults_major is not None:
+            d["page_faults_major"] = self.page_faults_major
+        if self.context_switches_voluntary is not None:
+            d["context_switches_voluntary"] = self.context_switches_voluntary
+        if self.context_switches_involuntary is not None:
+            d["context_switches_involuntary"] = self.context_switches_involuntary
+        if self.filesystem_inputs is not None:
+            d["filesystem_inputs"] = self.filesystem_inputs
+        if self.filesystem_outputs is not None:
+            d["filesystem_outputs"] = self.filesystem_outputs
         d.update(self.extra_stats)
         return d
 
@@ -298,7 +328,13 @@ class SolverPlugin(ABC):
         timeout: int = 5000,
         memory_limit_mb: int = 8192,
     ) -> SolverRunResult:
-        """Run the solver on *cnf_path* and return structured results."""
+        """Run the solver on *cnf_path* with resource tracking.
+
+        When GNU time (``/usr/bin/time``) is available, it wraps the solver
+        invocation to collect accurate user/system CPU time, peak RSS,
+        page faults, and context switches — metrics essential for
+        scientific benchmarking.
+        """
         result = SolverRunResult()
 
         if not self.is_installed():
@@ -308,8 +344,25 @@ class SolverPlugin(ABC):
 
         cmd = self.build_command(cnf_path)
 
+        # ---------- /usr/bin/time wrapper ----------
+        time_binary = shutil.which("time")
+        # shutil.which may return bash built-in; we need GNU time
+        if time_binary and "/usr/bin" not in time_binary:
+            # Double-check explicit path
+            if os.path.isfile("/usr/bin/time"):
+                time_binary = "/usr/bin/time"
+            else:
+                time_binary = None
+        elif not time_binary and os.path.isfile("/usr/bin/time"):
+            time_binary = "/usr/bin/time"
+
+        time_output_file = None
+        if time_binary:
+            time_output_file = tempfile.mktemp(suffix=".time", prefix="sat_")
+            cmd = [time_binary, "-v", "-o", time_output_file] + cmd
+
         try:
-            start = time.time()
+            start = time.perf_counter()
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -320,31 +373,71 @@ class SolverPlugin(ABC):
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     process.communicate(), timeout=timeout
                 )
-                wall = time.time() - start
+                wall = time.perf_counter() - start
 
+                # GNU time uses WIFSIGNALED-style codes; the solver's real
+                # exit code is forwarded by /usr/bin/time.
                 result.exit_code = process.returncode or 0
                 result.wall_time_seconds = wall
-                result.solver_output = stdout_bytes.decode("utf-8", errors="ignore")[:10_000]
-                error_out = stderr_bytes.decode("utf-8", errors="ignore")[:5_000]
+                result.solver_output = stdout_bytes.decode("utf-8", errors="ignore")[:50_000]
+                error_out = stderr_bytes.decode("utf-8", errors="ignore")[:10_000]
                 if error_out:
                     result.error_message = error_out
 
+                # Combine stdout + stderr for stat parsing (some solvers
+                # print stats to stderr, e.g. MiniSat-family)
+                full_output = result.solver_output + "\n" + error_out
+
                 # Determine SAT/UNSAT from exit code & output
-                result.result = self.parse_result(result.exit_code, result.solver_output)
+                result.result = self.parse_result(result.exit_code, full_output)
 
                 # Extract solver statistics
-                stats = self.parse_stats(result.solver_output)
+                stats = self.parse_stats(full_output)
                 result.conflicts = stats.get("conflicts")
                 result.decisions = stats.get("decisions")
                 result.propagations = stats.get("propagations")
                 result.restarts = stats.get("restarts")
+                result.learnt_clauses = stats.get("learnt_clauses")
+                result.deleted_clauses = stats.get("deleted_clauses")
                 result.cpu_time_seconds = stats.get("cpu_time_seconds", 0.0)
-                result.max_memory_kb = stats.get("max_memory_kb", 0)
+                if stats.get("max_memory_kb"):
+                    result.max_memory_kb = stats["max_memory_kb"]
                 # Everything else goes into extra_stats
                 for k, v in stats.items():
                     if k not in ("conflicts", "decisions", "propagations",
-                                 "restarts", "cpu_time_seconds", "max_memory_kb"):
+                                 "restarts", "learnt_clauses", "deleted_clauses",
+                                 "cpu_time_seconds", "max_memory_kb"):
                         result.extra_stats[k] = v
+
+                # ---------- Parse GNU time output ----------
+                if time_output_file and os.path.isfile(time_output_file):
+                    resource_stats = self._parse_gnu_time(time_output_file)
+                    # User/system CPU time (use GNU time values as ground truth)
+                    if "user_time" in resource_stats:
+                        result.user_time_seconds = resource_stats["user_time"]
+                    if "system_time" in resource_stats:
+                        result.system_time_seconds = resource_stats["system_time"]
+                    if result.user_time_seconds or result.system_time_seconds:
+                        result.cpu_time_seconds = (
+                            result.user_time_seconds + result.system_time_seconds
+                        )
+                    # Peak memory (use GNU time if solver didn't report)
+                    if resource_stats.get("max_rss_kb"):
+                        result.max_memory_kb = max(
+                            result.max_memory_kb,
+                            resource_stats["max_rss_kb"],
+                        )
+                    # Resource counters
+                    result.page_faults_minor = resource_stats.get("page_faults_minor")
+                    result.page_faults_major = resource_stats.get("page_faults_major")
+                    result.context_switches_voluntary = resource_stats.get(
+                        "voluntary_context_switches"
+                    )
+                    result.context_switches_involuntary = resource_stats.get(
+                        "involuntary_context_switches"
+                    )
+                    result.filesystem_inputs = resource_stats.get("fs_inputs")
+                    result.filesystem_outputs = resource_stats.get("fs_outputs")
 
             except asyncio.TimeoutError:
                 try:
@@ -365,8 +458,87 @@ class SolverPlugin(ABC):
         except Exception as exc:
             result.result = "ERROR"
             result.error_message = str(exc)
+        finally:
+            # Clean up temp file
+            if time_output_file:
+                try:
+                    os.unlink(time_output_file)
+                except OSError:
+                    pass
 
         return result
+
+    # ── GNU time output parser ───────────────────────
+
+    @staticmethod
+    def _parse_gnu_time(filepath: str) -> Dict[str, Any]:
+        """Parse the output of ``/usr/bin/time -v`` from a file.
+
+        Returns a dict with:
+          user_time, system_time, max_rss_kb, page_faults_minor,
+          page_faults_major, voluntary_context_switches,
+          involuntary_context_switches, fs_inputs, fs_outputs,
+          wall_clock, percent_cpu, exit_status
+        """
+        stats: Dict[str, Any] = {}
+        try:
+            with open(filepath, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if ":" not in line:
+                        continue
+                    key_part, _, value = line.rpartition(":")
+                    value = value.strip()
+                    key_lower = key_part.strip().lower()
+
+                    if "user time" in key_lower:
+                        stats["user_time"] = float(value)
+                    elif "system time" in key_lower:
+                        stats["system_time"] = float(value)
+                    elif "maximum resident set size" in key_lower:
+                        stats["max_rss_kb"] = int(value)
+                    elif "minor" in key_lower and "page fault" in key_lower:
+                        stats["page_faults_minor"] = int(value)
+                    elif "major" in key_lower and "page fault" in key_lower:
+                        stats["page_faults_major"] = int(value)
+                    elif "voluntary context switch" in key_lower:
+                        if "involuntary" in key_lower:
+                            stats["involuntary_context_switches"] = int(value)
+                        else:
+                            stats["voluntary_context_switches"] = int(value)
+                    elif "file system input" in key_lower:
+                        stats["fs_inputs"] = int(value)
+                    elif "file system output" in key_lower:
+                        stats["fs_outputs"] = int(value)
+                    elif "wall clock" in key_lower:
+                        # Format can be h:mm:ss or m:ss.ss
+                        parts = value.split(":")
+                        try:
+                            if len(parts) == 3:
+                                stats["wall_clock"] = (
+                                    int(parts[0]) * 3600
+                                    + int(parts[1]) * 60
+                                    + float(parts[2])
+                                )
+                            elif len(parts) == 2:
+                                stats["wall_clock"] = (
+                                    int(parts[0]) * 60 + float(parts[1])
+                                )
+                        except (ValueError, IndexError):
+                            pass
+                    elif "percent of cpu" in key_lower:
+                        m = re.search(r'(\d+)', value)
+                        if m:
+                            stats["percent_cpu"] = int(m.group(1))
+                    elif "exit status" in key_lower:
+                        try:
+                            stats["exit_status"] = int(value)
+                        except ValueError:
+                            pass
+        except Exception as exc:
+            logger.debug("Failed to parse GNU time output %s: %s", filepath, exc)
+
+        return stats
 
     # ── output parsing ──────────────────────────────────
 
@@ -388,7 +560,8 @@ class SolverPlugin(ABC):
         """
         Extract solver statistics from textual output.
         Override in subclass for solver-specific parsing.
-        The default implementation covers the most common patterns.
+        The default implementation covers the most common patterns
+        across all CDCL solvers.
         """
         stats: Dict[str, Any] = {}
         patterns = {
@@ -407,15 +580,21 @@ class SolverPlugin(ABC):
                 except ValueError:
                     pass
 
-        # CPU time
+        # CPU time (solver-reported)
         m = re.search(r"(?:CPU|process)[- ]time[:\s]+(\d+\.?\d*)\s*(?:s|seconds)", output, re.IGNORECASE)
         if m:
             stats["cpu_time_seconds"] = float(m.group(1))
 
-        # Memory in bytes → KB
+        # Memory: bytes → KB
         m = re.search(r"maximum-resident-set-size:\s+(\d+)\s*bytes", output, re.IGNORECASE)
         if m:
             stats["max_memory_kb"] = int(m.group(1)) // 1024
+
+        # Memory: MB → KB
+        if "max_memory_kb" not in stats:
+            m = re.search(r"(?:Memory used|Mem used|memory)\s*[:\s]+([\d.]+)\s*MB", output, re.IGNORECASE)
+            if m:
+                stats["max_memory_kb"] = int(float(m.group(1)) * 1024)
 
         return stats
 

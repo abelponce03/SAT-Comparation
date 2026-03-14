@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     zlib1g-dev \
+    time \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements e instalar dependencias Python
