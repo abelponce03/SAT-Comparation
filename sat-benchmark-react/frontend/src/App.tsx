@@ -8,6 +8,7 @@ import ExperimentDetail from './pages/ExperimentDetail'
 import Analysis from './pages/Analysis'
 import Visualization from './pages/Visualization'
 import SATModeler from './pages/SATModeler'
+import Tuning from './pages/Tuning'
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
         <Route path="analysis" element={<Analysis />} />
         <Route path="visualization" element={<Visualization />} />
         <Route path="modeler" element={<SATModeler />} />
+        <Route path="tuning" element={<Tuning />} />
       </Route>
     </Routes>
   )

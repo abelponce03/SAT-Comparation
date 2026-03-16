@@ -346,3 +346,27 @@ export const rigorousApi = {
 };
 
 export default api;
+
+// ==================== Tuning (Algorithm Configuration) ====================
+
+export const tuningApi = {
+  startTuning: async (request: { solver_name: string, instances: string[], timeout_per_run: number, max_evaluations: number }) => {
+    const { data } = await api.post('/tuning/start', request);
+    return data;
+  },
+  
+  getTuningStatus: async (job_id: string) => {
+    const { data } = await api.get(`/tuning/status/${job_id}`);
+    return data;
+  },
+  
+  startAblation: async (request: { solver_name: string, instances: string[], timeout_per_run: number, incumbent_config: any }) => {
+    const { data } = await api.post('/tuning/ablation/start', request);
+    return data;
+  },
+  
+  getAblationStatus: async (job_id: string) => {
+    const { data } = await api.get(`/tuning/ablation/status/${job_id}`);
+    return data;
+  }
+};

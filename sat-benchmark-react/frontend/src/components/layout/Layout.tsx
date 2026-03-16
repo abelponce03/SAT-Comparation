@@ -12,7 +12,8 @@ import {
   BookOpen,
   Zap,
   ChevronRight,
-  Code2
+  Code2,
+  Settings
 } from 'lucide-react';
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -25,6 +26,7 @@ const navigation = [
   { name: 'Analysis', href: '/analysis', icon: BarChart3, description: 'Análisis estadístico completo' },
   { name: 'Visualization', href: '/visualization', icon: LineChart, description: 'Gráficos y visuales' },
   { name: 'SAT Modeler', href: '/modeler', icon: Code2, description: 'Modelar y resolver SAT' },
+  { name: 'Tuning SMAC3', href: '/tuning', icon: Settings, description: 'Algorithm Configuration' },
 ];
 
 export default function Layout() {
