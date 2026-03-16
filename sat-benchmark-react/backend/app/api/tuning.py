@@ -1,11 +1,10 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from app.analysis.tuning import AlgorithmTuner
 
 router = APIRouter(
-    prefix="/tuning",
     tags=["Algorithm Configuration"]
 )
 
